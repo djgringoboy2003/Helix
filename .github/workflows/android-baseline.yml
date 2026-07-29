@@ -40,11 +40,31 @@ jobs:
       - name: Regression tests
         run: npm run test:regressions
 
+      # `android/app/build.gradle` applies the Google Services plugin
+      # unconditionally, so Gradle cannot run at all without this file. It is
+      # gitignored, which means a fork without the secret configured can only
+      # run the checks above — that is reported and skipped rather than failed,
+      # so a missing secret does not look like broken code.
+      - name: Decode Firebase Android config
+        id: firebase
+        env:
+          FIREBASE_CONFIG_B64: ${{ secrets.FIREBASE_CONFIG_B64 }}
+        run: |
+          if [ -z "$FIREBASE_CONFIG_B64" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::FIREBASE_CONFIG_B64 is not configured, so the Android build was skipped. TypeScript and regression checks still ran."
+          else
+            printf '%s' "$FIREBASE_CONFIG_B64" | base64 -d > android/app/google-services.json
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build debug APK
+        if: steps.firebase.outputs.available == 'true'
         working-directory: android
         run: ./gradlew assembleDebug --no-daemon
 
       - name: Upload APK
+        if: steps.firebase.outputs.available == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: android-debug-apk
