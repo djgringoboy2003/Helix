@@ -31,7 +31,11 @@ export const expoDownloadIo: DownloadIo = {
         : undefined
     );
     const result = await download.downloadAsync();
+    // `downloadAsync` resolves for any response it managed to write, including
+    // a 403 sign-in page or a 418 CAPTCHA challenge, so the status is passed up
+    // rather than treated as success.
     if (!result) throw new Error('The download was interrupted.');
+    return { status: result.status, mimeType: result.mimeType };
   },
 
   async writeBase64(uri, base64) {

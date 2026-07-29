@@ -13,19 +13,33 @@ import {
   checkReceivedBytes,
   sanitizeDownloadFilename,
 } from './DownloadHostPolicy';
+import {
+  describeReason,
+  reasonForResponse,
+  reasonForTransportError,
+  type DownloadResponse,
+} from './DownloadFailure';
 import { filenameFromUrl, type CapturedDownload } from './WebViewDownloadCapture';
 import { ModelSourceError } from './ModelSourceProvider';
 import type { BridgeDownloadResult } from './MakerWorldWebViewProvider';
 
+const PROVIDER_ID = 'makerworld-webview';
+
 export interface DownloadIo {
   /** Removes any previous file at `uri`; must not throw when absent. */
   remove(uri: string): Promise<void>;
-  /** Fetches `url` to `uri`, reporting progress where the platform can. */
+  /**
+   * Fetches `url` to `uri`, reporting progress where the platform can.
+   *
+   * Returns the response rather than just succeeding, because a download that
+   * "worked" can still have written an HTML sign-in page or a CAPTCHA
+   * challenge. The caller decides whether the response is a model.
+   */
   fetchToFile(
     url: string,
     uri: string,
     onProgress?: (received: number, total: number | null) => void
-  ): Promise<void>;
+  ): Promise<DownloadResponse>;
   /** Writes base64 content to `uri`. */
   writeBase64(uri: string, base64: string): Promise<void>;
   /** Size in bytes, or `null` when the file does not exist. */
@@ -82,16 +96,35 @@ export async function saveCapturedDownload(
   if (capture.kind === 'url') {
     const urlCheck = checkDownloadUrl(capture.sourceUrl);
     if (!urlCheck.ok) {
-      throw new ModelSourceError('makerworld-webview', 'policy-rejected', urlCheck.message);
+      throw new ModelSourceError(PROVIDER_ID, 'policy-rejected', urlCheck.message);
     }
     sourceUrl = capture.sourceUrl;
     suggestedName = capture.suggestedName || filenameFromUrl(capture.sourceUrl);
-    await io.fetchToFile(sourceUrl, targetUri, onProgress);
+
+    let response: DownloadResponse;
+    try {
+      response = await io.fetchToFile(sourceUrl, targetUri, onProgress);
+    } catch (error) {
+      // A refusal mid-transfer can still leave a partial file behind.
+      await io.remove(targetUri).catch(() => {});
+      const reason = reasonForTransportError(error);
+      throw new ModelSourceError(PROVIDER_ID, reason, describeReason(reason));
+    }
+
+    // The response body has already been written. If it is a sign-in page or a
+    // CAPTCHA challenge rather than a model, the file on disk is non-empty and
+    // hashes cleanly, so nothing downstream would notice — it has to be
+    // rejected and deleted here.
+    const reason = reasonForResponse(response);
+    if (reason) {
+      await io.remove(targetUri).catch(() => {});
+      throw new ModelSourceError(PROVIDER_ID, reason, describeReason(reason));
+    }
   } else {
     const declared = decodedBase64Size(capture.base64);
     const sizeCheck = checkDownloadSize(declared);
     if (!sizeCheck.ok) {
-      throw new ModelSourceError('makerworld-webview', 'policy-rejected', sizeCheck.message);
+      throw new ModelSourceError(PROVIDER_ID, 'policy-rejected', sizeCheck.message);
     }
     // A blob never left the page, so there is no host to check. It is recorded
     // as coming from the model page itself, which is what the provider's own
@@ -105,16 +138,17 @@ export async function saveCapturedDownload(
 
   const sizeBytes = await io.sizeOf(targetUri);
   if (sizeBytes === null) {
-    throw new ModelSourceError('makerworld-webview', 'network', 'The download did not produce a file.');
+    throw new ModelSourceError(PROVIDER_ID, 'network', 'The download did not produce a file.');
   }
   if (sizeBytes <= 0) {
-    throw new ModelSourceError('makerworld-webview', 'empty-file', 'The downloaded file is empty.');
+    await io.remove(targetUri).catch(() => {});
+    throw new ModelSourceError(PROVIDER_ID, 'empty-file', describeReason('empty-file'));
   }
 
   const receivedCheck = checkReceivedBytes(sizeBytes);
   if (!receivedCheck.ok) {
     await io.remove(targetUri).catch(() => {});
-    throw new ModelSourceError('makerworld-webview', 'policy-rejected', receivedCheck.message);
+    throw new ModelSourceError(PROVIDER_ID, 'policy-rejected', receivedCheck.message);
   }
 
   return {

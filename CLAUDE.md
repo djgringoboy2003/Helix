@@ -28,6 +28,8 @@ Use the current repository as the source of truth. This project should begin as 
 
 Before changing code, read:
 
+- `docs/CURRENT_STATE.md` — read this first. Where the project actually stands,
+  what is next, and which shipped behaviour must not be refactored in passing.
 - `README.md`
 - `docs/PROJECT_MASTER_PLAN.md`
 - `docs/TECHNICAL_ARCHITECTURE.md`
@@ -123,9 +125,14 @@ Use Crossprint and MkWorld2Snap as behavioural references unless licence compati
 
 ## Initial delivery target
 
-Complete these items first:
+**Stages A, B and C below are complete** (commits `403208a`, `add4de6`,
+`75d5563`). They are kept here as the record of what was asked for and what the
+acceptance criteria were. Do not redo them.
 
-### Stage A, repository baseline
+Current position and next phase: `docs/CURRENT_STATE.md`. Work now continues
+through `docs/IMPLEMENTATION_BACKLOG.md` from Phase 4.
+
+### Stage A, repository baseline — done
 
 - inspect repository.
 - identify package manager and build commands.
@@ -140,7 +147,7 @@ Complete these items first:
 
 Do not change product behaviour during Stage A.
 
-### Stage B, architecture scaffolding
+### Stage B, architecture scaffolding — done
 
 Add:
 
@@ -155,7 +162,7 @@ services/security/FileHash.ts
 
 Add tests before wiring screens.
 
-### Stage C, MakerWorld WebView MVP
+### Stage C, MakerWorld WebView MVP — done
 
 Add an Explore tab with:
 
@@ -171,17 +178,13 @@ Do not rebuild MakerWorld search natively during this stage.
 
 ## First response expected from Claude Code
 
-Before making edits, return:
+Stages A to C are done, so the original "audit the repository first" opening no
+longer applies. Instead:
 
-1. repository summary.
-2. current build system.
-3. native module risks.
-4. licence findings.
-5. existing features worth retaining.
-6. exact Stage A commands.
-7. likely files touched during Stage B and Stage C.
-8. a short implementation order.
-
-Then perform Stage A.
+1. Read `docs/CURRENT_STATE.md`.
+2. Confirm the tree is green before changing anything — `npm run typecheck` and
+   `npm run test:regressions`.
+3. Say which phase you are starting and which files you expect to touch.
+4. Then work.
 
 Continue without asking broad preference questions. Stop only for a decision where proceeding risks data loss, licence breach or physical printer safety.

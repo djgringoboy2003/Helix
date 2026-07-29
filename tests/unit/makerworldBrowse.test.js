@@ -23,6 +23,11 @@ const {
   saveCapturedDownload,
 } = require(servicePath('makerworld', 'DownloadWriter.ts'));
 const { MAX_DOWNLOAD_BYTES } = require(servicePath('makerworld', 'DownloadHostPolicy.ts'));
+const {
+  describeReason,
+  reasonForResponse,
+  reasonForTransportError,
+} = require(servicePath('makerworld', 'DownloadFailure.ts'));
 
 // --- Messages from the page ------------------------------------------------
 //
@@ -209,6 +214,7 @@ function fakeIo(overrides = {}) {
         onProgress?.(10, 20);
         onProgress?.(20, 20);
         files.set(uri, 20);
+        return { status: 200, mimeType: 'application/octet-stream' };
       },
       async writeBase64(uri, base64) {
         calls.written.push({ uri, base64 });
@@ -374,9 +380,174 @@ test('a non-numeric model id never reaches the filesystem path', async () => {
   ]);
 });
 
+// --- Responses that are not models -----------------------------------------
+//
+// MakerWorld answers 403 when not signed in and 418 for its bot check, and in
+// both cases it still sends a body. That body gets written to disk, so it is
+// non-empty and hashes cleanly — nothing downstream can tell it is not a model.
+// These are the cases the fake IO originally could not express at all.
+
+test('an HTTP refusal is classified rather than saved as a model', async () => {
+  const cases = [
+    [401, 'not-signed-in'],
+    [403, 'forbidden'],
+    [418, 'captcha-required'],
+    [429, 'rate-limited'],
+    [500, 'network'],
+    [503, 'network'],
+    [302, 'unknown'],
+  ];
+
+  for (const [status, expected] of cases) {
+    const refused = fakeIo();
+    refused.io.fetchToFile = async (url, uri) => {
+      // The error page is written before the status is known — that is exactly
+      // what makes it dangerous.
+      refused.files.set(uri, 4096);
+      return { status, mimeType: 'text/html' };
+    };
+
+    await assert.rejects(
+      saveCapturedDownload({
+        capture: urlCapture,
+        targetDirectory: 'file:///docs/',
+        modelId: '1234567',
+        io: refused.io,
+      }),
+      (error) => error.name === 'ModelSourceError' && error.reason === expected,
+      `HTTP ${status}`
+    );
+    assert.equal(
+      refused.files.has('file:///docs/makerworld_1234567.3mf'),
+      false,
+      `the ${status} body must not be left on disk`
+    );
+  }
+});
+
+test('a 200 carrying an error page is refused on its content type', async () => {
+  for (const mimeType of ['text/html', 'text/html; charset=utf-8', 'application/json']) {
+    const wrong = fakeIo();
+    wrong.io.fetchToFile = async (url, uri) => {
+      wrong.files.set(uri, 2048);
+      return { status: 200, mimeType };
+    };
+    await assert.rejects(
+      saveCapturedDownload({
+        capture: urlCapture,
+        targetDirectory: 'file:///docs/',
+        modelId: '1',
+        io: wrong.io,
+      }),
+      (error) => error.reason === 'forbidden',
+      mimeType
+    );
+  }
+});
+
+test('the content types a real 3MF arrives with are accepted', async () => {
+  for (const mimeType of [
+    'application/octet-stream',
+    'application/zip',
+    'model/3mf',
+    'application/vnd.ms-package.3dmanufacturing-3dmodel+xml',
+    null,
+    undefined,
+  ]) {
+    const ok = fakeIo();
+    ok.io.fetchToFile = async (url, uri) => {
+      ok.files.set(uri, 20);
+      return { status: 200, mimeType };
+    };
+    const result = await saveCapturedDownload({
+      capture: urlCapture,
+      targetDirectory: 'file:///docs/',
+      modelId: '1',
+      io: ok.io,
+    });
+    assert.equal(result.sizeBytes, 20, String(mimeType));
+  }
+});
+
+test('transport errors are classified by what they say', () => {
+  assert.equal(reasonForTransportError(new Error('Network request failed')), 'network');
+  assert.equal(reasonForTransportError(new Error('socket hang up')), 'network');
+  assert.equal(reasonForTransportError(new Error('The request was aborted')), 'cancelled');
+  assert.equal(reasonForTransportError(new Error('User cancelled')), 'cancelled');
+  // Anything unrecognisable is a network problem rather than a silent success.
+  assert.equal(reasonForTransportError(undefined), 'network');
+  assert.equal(reasonForTransportError('weird'), 'network');
+});
+
+test('a transport failure is network, and an abort is cancelled', async () => {
+  const lost = fakeIo();
+  lost.io.fetchToFile = async () => {
+    throw new Error('Network request failed');
+  };
+  await assert.rejects(
+    saveCapturedDownload({
+      capture: urlCapture,
+      targetDirectory: 'file:///docs/',
+      modelId: '1',
+      io: lost.io,
+    }),
+    (error) => error.reason === 'network'
+  );
+
+  const aborted = fakeIo();
+  aborted.io.fetchToFile = async (url, uri) => {
+    aborted.files.set(uri, 900);
+    throw new Error('The request was aborted');
+  };
+  await assert.rejects(
+    saveCapturedDownload({
+      capture: urlCapture,
+      targetDirectory: 'file:///docs/',
+      modelId: '1',
+      io: aborted.io,
+    }),
+    (error) => error.reason === 'cancelled'
+  );
+  assert.equal(
+    aborted.files.has('file:///docs/makerworld_1.3mf'),
+    false,
+    'a partial file must not survive an interrupted download'
+  );
+});
+
+test('every failure reason has operator-facing text that says what to do', () => {
+  const reasons = [
+    'not-signed-in',
+    'captcha-required',
+    'forbidden',
+    'rate-limited',
+    'network',
+    'cancelled',
+    'policy-rejected',
+    'empty-file',
+    'unknown',
+  ];
+  for (const reason of reasons) {
+    const text = describeReason(reason);
+    assert.equal(typeof text, 'string');
+    assert.ok(text.length > 20, reason);
+    // A signed CDN URL or a raw status code must never reach the operator.
+    assert.equal(/https?:\/\//.test(text), false, reason);
+  }
+});
+
+test('a successful response is not a failure', () => {
+  for (const status of [200, 201, 206, 299]) {
+    assert.equal(reasonForResponse({ status, mimeType: 'application/zip' }), null, String(status));
+  }
+});
+
 test('an empty or missing download is reported, not returned', async () => {
   const empty = fakeIo();
-  empty.io.fetchToFile = async (url, uri) => empty.files.set(uri, 0);
+  empty.io.fetchToFile = async (url, uri) => {
+    empty.files.set(uri, 0);
+    return { status: 200, mimeType: 'application/zip' };
+  };
   await assert.rejects(
     saveCapturedDownload({
       capture: urlCapture,
@@ -388,7 +559,7 @@ test('an empty or missing download is reported, not returned', async () => {
   );
 
   const absent = fakeIo();
-  absent.io.fetchToFile = async () => {};
+  absent.io.fetchToFile = async () => ({ status: 200, mimeType: 'application/zip' });
   await assert.rejects(
     saveCapturedDownload({
       capture: urlCapture,
@@ -402,8 +573,10 @@ test('an empty or missing download is reported, not returned', async () => {
 
 test('a file that lands over the size cap is deleted rather than kept', async () => {
   const oversized = fakeIo();
-  oversized.io.fetchToFile = async (url, uri) =>
+  oversized.io.fetchToFile = async (url, uri) => {
     oversized.files.set(uri, MAX_DOWNLOAD_BYTES + 1);
+    return { status: 200, mimeType: 'application/zip' };
+  };
   await assert.rejects(
     saveCapturedDownload({
       capture: urlCapture,

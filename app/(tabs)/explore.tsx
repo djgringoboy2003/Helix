@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Linking,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -286,6 +287,22 @@ export default function ExploreScreen() {
           icon="home-outline"
           label="MakerWorld"
           onPress={() => void bridge.openBrowser(exploreStartUrl())}
+        />
+        <ToolbarButton
+          icon="open-in-new"
+          label="Open in browser"
+          // The page as the operator currently sees it, handed to the real
+          // browser — for anything the in-app WebView cannot do, such as the
+          // SSO sign-ins Google and Apple refuse to run in an embedded view.
+          disabled={!location.url}
+          onPress={() => {
+            Linking.openURL(location.url).catch(() => {
+              setImportState({
+                phase: 'error',
+                message: 'No browser is available to open this page.',
+              });
+            });
+          }}
         />
 
         <View style={styles.locationBox}>

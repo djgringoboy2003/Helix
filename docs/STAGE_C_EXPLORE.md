@@ -16,8 +16,9 @@ off into the same slicer import flow. Nothing was removed.
 | `services/makerworld/WebViewDownloadCapture.ts` | Injected hooks, and parsing of what the page posts back |
 | `services/makerworld/BrowseNavigation.ts` | Location classification behind the toolbar |
 | `services/makerworld/DownloadWriter.ts` | Intercepted download → bytes on disk, with policy enforced |
+| `services/makerworld/DownloadFailure.ts` | Response and transport failures → `DownloadFailureReason` |
 | `services/makerworld/ExpoDownloadIo.ts` | The real file system behind `DownloadWriter` |
-| `tests/unit/makerworldBrowse.test.js` | 30 assertions across the three logic modules |
+| `tests/unit/makerworldBrowse.test.js` | 37 assertions across the four logic modules |
 
 `app/(tabs)/_layout.tsx` gained one `Tabs.Screen` entry. That is the only
 existing file Stage C modifies.
@@ -29,6 +30,8 @@ existing file Stage C modifies.
 | MakerWorld WebView | `explore.tsx` |
 | Persistent login session | `sharedCookiesEnabled` + the existing native cookie capture; session state shown in the toolbar, with a link to `app/makerworld-login.tsx` |
 | Back, forward, refresh, open-current-model | Toolbar buttons; `describeLocation` decides when import is offered |
+| External-open control | Toolbar `open-in-new` hands the current page to the real browser, for what an embedded WebView cannot do (Google and Apple refuse SSO in one) |
+| Captcha page | The page's own challenge is solved in place; a `418` response is classified as `captcha-required` |
 | Model and profile URL detection | `BrowseNavigation.describeLocation` over `MakerWorldUrlParser` |
 | Android download interception | `MAKERWORLD_DOWNLOAD_HOOK` plus `onShouldStartLoadWithRequest` |
 | Progress and failure state | `ImportStatus` — downloading / verifying / done / error |
@@ -54,6 +57,39 @@ it again afterwards. The second check is not redundant — it is the provider's 
 contract with any future bridge — but it happens after the request has already
 gone out, so it cannot be the only one. The decision whether to contact a host at
 all has to be made before contacting it.
+
+### A response that "succeeded" is not necessarily a model
+
+The first version of this stage had a real defect, found by checking Phase 3's
+own test list rather than by anything failing: `ExpoDownloadIo` discarded the
+HTTP status, so a `403` sign-in page or a `418` CAPTCHA challenge was written to
+disk, passed the `size > 0` check, hashed cleanly, and reached the Slice tab as a
+model. The failure would have surfaced much later as a slicer error, carrying a
+SHA-256 that honestly described an HTML error page.
+
+The cause was the seam, not the check: `DownloadIo.fetchToFile` returned
+`Promise<void>`, so no fake could express a refusal and no test could reach the
+case. It now returns the status and content type, and `DownloadFailure`
+classifies them:
+
+| Response | Reason | What the operator is told to do |
+|---|---|---|
+| `401` | `not-signed-in` | Sign in |
+| `403`, or `2xx` with an HTML/JSON body | `forbidden` | Sign in, or open the model page first |
+| `418` | `captcha-required` | Solve the puzzle on the page |
+| `429` | `rate-limited` | Wait a minute |
+| `5xx`, transport failure | `network` | Check the connection |
+| aborted | `cancelled` | — |
+
+The `2xx`-with-an-error-page row is the one that matters most: MakerWorld does
+answer `200` with a sign-in page, so the status alone would not have caught it.
+Only content types that are *never* a model are rejected — a real 3MF arrives as
+`application/octet-stream`, `application/zip` or `model/3mf`, and rejecting an
+unfamiliar type would break valid downloads. Any rejected body is deleted rather
+than left on disk.
+
+Magic-byte validation would be stronger still. `ThreeMfSecurityScanner` already
+does it and is tested; wiring it into the import path is Phase 4.
 
 ### Everything the page sends is treated as hostile
 
@@ -96,14 +132,37 @@ digest later; that would be a performance change, not a correctness one.
 | Check | Result |
 |---|---|
 | `npm run typecheck` | **Pass**, no errors |
-| `npm run test:regressions` | **Pass**, 222 assertions (192 pre-existing + 30 new) |
+| `npm run test:regressions` | **Pass**, 229 assertions (192 pre-existing + 37 new) |
 | `npx eslint` on all Stage C paths | **Pass**, no errors or warnings |
 | `npx expo export --platform android` | **Pass** — 4.21 MB Hermes bundle, whole JS graph resolves |
 | `cd android && ./gradlew assembleDebug` | **Pass** |
+| `cd android && ./gradlew assembleRelease` | **Pass** — installed on device `53b451df`, launches clean |
 
 The 5 pre-existing `import/no-unresolved` errors in `functions/src/index.ts`
 remain; they are environmental (`functions/node_modules` is not installed
 locally) and resolve in CI, which installs it.
+
+### Phase 3 acceptance tests
+
+`docs/IMPLEMENTATION_BACKLOG.md` Phase 3 names ten. Eight are covered by the
+suite; two need a person, a phone and a MakerWorld account.
+
+| Test | Where |
+|---|---|
+| Logged-out flow | `getSessionStatus`, and the sign-in bar shown when `hasAuth` is false |
+| Navigation history | `describeLocation` across model, profile, browse and off-site URLs |
+| Profile download | Profile-URL parsing carries `profileId` into the import |
+| Cancelled download | `runDownload` returning `null`; and an aborted transfer, whose partial file is deleted |
+| Network loss | Transport error → `network` |
+| 403 response | → `forbidden`, body deleted |
+| 418 / captcha flow | → `captcha-required`, body deleted |
+| Large file rejection | Declared size, received bytes, and an oversized blob rejected before decoding |
+| Invalid redirect rejection | `checkRedirectChain` — every hop checked, not just the last |
+| **Logged-in flow** | **Device only** — needs a real account and a real CAPTCHA |
+
+Live back/forward history and the real logged-in download also need the device;
+`canGoBack` / `canGoForward` come from the WebView, so there is no logic of ours
+to assert on.
 
 ## Deliberately not done in Stage C
 
