@@ -1,20 +1,8 @@
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
 const path = require('node:path');
-const ts = require('typescript');
+const { installTypeScriptLoader, loadUnitSuites, run, test } = require('./test-harness');
 
-require.extensions['.ts'] = function loadTypeScript(module, filename) {
-  const source = fs.readFileSync(filename, 'utf8');
-  const { outputText } = ts.transpileModule(source, {
-    compilerOptions: {
-      esModuleInterop: true,
-      module: ts.ModuleKind.CommonJS,
-      target: ts.ScriptTarget.ES2020,
-    },
-    fileName: filename,
-  });
-  module._compile(outputText, filename);
-};
+installTypeScriptLoader();
 
 const {
   countSelectedMacros,
@@ -94,16 +82,6 @@ const {
   deriveMainType,
   resolveProfileValues,
 } = require(path.join('..', 'services', 'filamentProfiles.ts'));
-
-function test(name, fn) {
-  try {
-    fn();
-    console.log(`PASS ${name}`);
-  } catch (error) {
-    console.error(`FAIL ${name}`);
-    throw error;
-  }
-}
 
 test('normalizes invalid macro display to show all', () => {
   assert.deepEqual(normalizeMacroDisplay(undefined), { mode: 'all', selected: [] });
@@ -1019,3 +997,8 @@ test('builds camera snapshot cache-bust URL and filename', () => {
     'helix-camera-2026-07-03T12-34-56-789Z.jpg'
   );
 });
+
+// Stage B domain suites (jobs, security, MakerWorld, import) live in their own
+// files so this one stays focused on the pre-existing app services.
+loadUnitSuites();
+run();

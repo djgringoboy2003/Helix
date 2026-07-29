@@ -35,7 +35,7 @@ No Jest/Vitest — `scripts/check-regressions.js` is a hand-rolled runner that t
 
 Android native unit tests exist separately under `android/app/src/test/java/org/crabcore/u1control/slicing/` (JUnit/Kotlin: `GcodeFirstLayerGuardTest.kt`, `GcodeToolMapperTest.kt`), run via Gradle (`./gradlew testDebugUnitTest`), not via `npm run test:regressions`.
 
-Local environment note: this machine's shell had no `JAVA_HOME`/`ANDROID_HOME` set and no `android/local.properties`. Fixed for this session by adding `android/local.properties` (`sdk.dir=C:\Users\rober\AppData\Local\Android\Sdk`, gitignored) and exporting `JAVA_HOME`/`ANDROID_HOME` before invoking Gradle. A `google-services.json` (gitignored, see section 3) is also required at `android/app/` before any Gradle build — neither file is committed, so both are one-time local setup steps for anyone building this fork from scratch.
+Local environment note: this machine's shell had no `JAVA_HOME`/`ANDROID_HOME` set and no `android/local.properties`. On this machine the values are `JAVA_HOME=C:\Program Files\Eclipse Adoptium\jdk-17.0.17.10-hotspot` and `ANDROID_HOME=%LOCALAPPDATA%\Android\Sdk`; Gradle needs the Windows form of these paths, so invoke `gradlew.bat` from PowerShell rather than exporting POSIX paths in Git Bash, which Gradle rejects as an invalid directory. Fixed for this session by adding `android/local.properties` (`sdk.dir=C:\Users\rober\AppData\Local\Android\Sdk`, gitignored) and exporting `JAVA_HOME`/`ANDROID_HOME` before invoking Gradle. A `google-services.json` (gitignored, see section 3) is also required at `android/app/` before any Gradle build — neither file is committed, so both are one-time local setup steps for anyone building this fork from scratch.
 
 ## 3. Baseline results
 
