@@ -120,6 +120,15 @@ export default function TabLayout() {
           options={{ title: 'multiACE', href: null }}
         />
         <Tabs.Screen
+          name="explore"
+          options={{
+            title: 'Explore',
+            headerShown: false,
+            tabBarLabel: 'Explore',
+            tabBarIcon: tabIcon('compass-outline'),
+          }}
+        />
+        <Tabs.Screen
           name="slicer"
           options={{ title: 'Slicer', tabBarLabel: 'Slice', tabBarIcon: tabIcon('cube-outline') }}
         />
