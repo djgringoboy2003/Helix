@@ -22,3 +22,13 @@ android/app/google-services.json
 tools/
 .omc/
 functions/lib/
+
+# secrets / generated content (snapmaker-u1-makerworld app work)
+.env
+.env.*
+!.env.example
+coverage/
+tmp/
+downloads/
+models/
+gcode/
