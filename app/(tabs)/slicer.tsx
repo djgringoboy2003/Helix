@@ -33,6 +33,7 @@ import {
   openNativeModelPreview,
   injectTimelapseMacros,
   pickModelFile,
+  readProjectSettings,
   setFilamentSlotColors,
   collapseModelToTool,
   remapModelExtruders,
@@ -57,6 +58,13 @@ import { runU1Preparation, summarizeReport } from '../../services/prepare/U1Prep
 import { nativePrepareIo } from '../../services/prepare/NativePrepareIo';
 import type { ConversionReport } from '../../services/prepare/U1ProjectPreparer';
 import PreparationReportCard from '../../components/PreparationReportCard';
+import {
+  readLoadedSlots,
+  readProjectFilaments,
+  type ProjectFilament,
+} from '../../services/filament/FilamentSlots';
+import { planFilamentMapping } from '../../services/filament/FilamentMappingPlanner';
+import FilamentMappingCard from '../../components/FilamentMappingCard';
 import { setPrintSentNotice } from '../../services/printSentBus';
 import PrintPreprocessDialog, { type PrintPref } from '../../components/PrintPreprocessDialog';
 import { api, printerConnectionUrl, thumbnailUrl } from '../../services/moonraker';
@@ -154,6 +162,17 @@ export default function SliceLabScreen() {
   // What retargeting the current model for the U1 changed. Null when the file
   // needed none — a mesh, or a 3MF with no foreign machine profile.
   const [prepareReport, setPrepareReport] = useState<ConversionReport | null>(null);
+  // The colours this project was designed in, and the operator's choice of
+  // toolhead for each. Choices are kept apart from the plan so a live printer
+  // update re-judges the mapping without discarding what the operator picked.
+  const [projectFilaments, setProjectFilaments] = useState<ProjectFilament[]>([]);
+  const [filamentChoices, setFilamentChoices] = useState<Record<number, number | null>>({});
+  // Confirmation is stored against the mapping hash it was given for, so a
+  // spool swapped at the printer silently invalidates it — the same rule
+  // `PrintJobMachine` applies to a start approval.
+  const [mappingConfirmed, setMappingConfirmed] = useState<{ at: number; hash: string } | null>(
+    null
+  );
   const [extracting, setExtracting] = useState(false);
   const [extractProgress, setExtractProgress] = useState<{ percent: number; phase: string } | null>(null);
   const [sayingIdx, setSayingIdx] = useState(0);
@@ -182,6 +201,11 @@ export default function SliceLabScreen() {
     () => resolveToolLoad(status, objectList, ace.units, ace.hardwareDetected, connection),
     [status, objectList, ace.units, ace.hardwareDetected, connection],
   );
+  // What is physically on each of the four toolheads, right now.
+  const loadedSlots = useMemo(
+    () => readLoadedSlots(status.print_task_config, ace.headSources),
+    [status.print_task_config, ace.headSources],
+  );
   const filamentSlots = useMemo(
     () => resolveFilamentSlots(
       status,
@@ -196,6 +220,41 @@ export default function SliceLabScreen() {
     () => filamentSlots.map((slot) => slot.color),
     [filamentSlots],
   );
+
+  /**
+   * The proposed mapping, re-judged whenever the printer or a choice changes.
+   *
+   * Built unconfirmed. The stored confirmation is only honoured while it still
+   * matches the mapping's hash, so swapping a spool at the printer withdraws it
+   * without anyone having to notice — the same binding rule a start approval
+   * uses in `PrintJobMachine`.
+   */
+  const filamentPlan = useMemo(() => {
+    if (projectFilaments.length === 0) return null;
+    const proposal = planFilamentMapping(projectFilaments, loadedSlots, {
+      choices: filamentChoices,
+    });
+    const confirmedAt =
+      mappingConfirmed && mappingConfirmed.hash === proposal.mapHash
+        ? mappingConfirmed.at
+        : null;
+    return {
+      ...proposal,
+      mapping: { ...proposal.mapping, confirmedAt },
+    };
+  }, [projectFilaments, loadedSlots, filamentChoices, mappingConfirmed]);
+
+  const chooseToolhead = useCallback((sourceIndex: number, toolhead: number | null) => {
+    // Changing the mapping withdraws any confirmation; re-confirming is the
+    // operator saying yes to the new one, not the old one.
+    setMappingConfirmed(null);
+    setFilamentChoices((current) => ({ ...current, [sourceIndex]: toolhead }));
+  }, []);
+
+  const confirmMapping = useCallback(() => {
+    if (!filamentPlan?.ok) return;
+    setMappingConfirmed({ at: Date.now(), hash: filamentPlan.mapHash });
+  }, [filamentPlan]);
 
   // Keep native paint/preview prefs aligned with the saved slot colours.
   useEffect(() => {
@@ -247,6 +306,9 @@ export default function SliceLabScreen() {
     setSelectedPlate(null);
     setPlatesFor(null);
     setPrepareReport(null);
+    setProjectFilaments([]);
+    setFilamentChoices({});
+    setMappingConfirmed(null);
   }, []);
 
   /**
@@ -322,6 +384,19 @@ export default function SliceLabScreen() {
 
       const report = prepared.status === 'prepared' ? prepared.report : null;
       setPrepareReport(report);
+
+      // The colours this project was designed in, read back from the prepared
+      // file so the mapping is judged against the same bytes that get sliced.
+      try {
+        const settingsText = await readProjectSettings(prepared.filePath);
+        setProjectFilaments(
+          settingsText ? readProjectFilaments(JSON.parse(settingsText) as unknown) : []
+        );
+      } catch {
+        // A project whose filament list cannot be read gets no mapping card
+        // rather than an empty one implying it has no colours.
+        setProjectFilaments([]);
+      }
 
       const notes = [
         ...record.notices.map((item) => item.message),
@@ -1146,6 +1221,15 @@ export default function SliceLabScreen() {
           </View>
         ) : null}
         {hasModel ? <PreparationReportCard report={prepareReport} /> : null}
+        {hasModel && filamentPlan ? (
+          <FilamentMappingCard
+            plan={filamentPlan}
+            loaded={loadedSlots}
+            confirmedAt={filamentPlan.mapping.confirmedAt}
+            onChoose={chooseToolhead}
+            onConfirm={confirmMapping}
+          />
+        ) : null}
         {!mwAuthed ? (
           <Text style={styles.hintText}>
             MakerWorld login is in{' '}

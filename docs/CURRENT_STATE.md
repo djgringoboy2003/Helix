@@ -3,7 +3,7 @@
 Where the project actually stands, for picking up work without re-deriving it.
 Update this whenever a phase closes.
 
-**Last updated:** 2026-07-31, after Phase 5.
+**Last updated:** 2026-07-31, after Phase 6.
 
 ## Orientation
 
@@ -27,9 +27,10 @@ existing behaviour behind safety gates, not building new — see
 | CI fix | `850b733` | `android-baseline.yml` skips the APK build when `FIREBASE_CONFIG_B64` is absent. |
 | C fix | `957843d` | `DownloadIo` returns HTTP status and content type, so a 403 or 418 page is no longer written to disk and hashed as a model. |
 | 4 — unified imports | `683e32f` | `services/import/{ImportCoordinator,ImportTypes,ImportLibrary,ThreeMfInspector,ExpoImportIo}.ts`. `docs/PHASE_4_IMPORTS.md`. |
-| 5 — U1 preparation | pending commit | `services/prepare/`, `U1ProjectRewriter.kt`, `PreparationReportCard.tsx`. `docs/PHASE_5_U1_PREPARATION.md`. |
+| 5 — U1 preparation | `02e60a6` | `services/prepare/`, `U1ProjectRewriter.kt`, `PreparationReportCard.tsx`. `docs/PHASE_5_U1_PREPARATION.md`. |
+| 6 — filament mapping | pending commit | `services/filament/`, `FilamentMappingCard.tsx`. `docs/PHASE_6_FILAMENT_MAPPING.md`. |
 
-Backlog phases 0–5 are complete except the two Phase 3 acceptance tests that
+Backlog phases 0–6 are complete except the two Phase 3 acceptance tests that
 need a device and a real MakerWorld account (logged-in download, live navigation
 history). Phase 1 (branding, icons, app identity) was **not** done — the app is
 still `Helix` / `org.crabcore.u1control` / 1.2.8.
@@ -46,14 +47,18 @@ filament-change G-code are replaced from the bundled U1 profile before anything
 can slice the file. See `docs/PHASE_5_U1_PREPARATION.md`, including what could
 **not** be verified about the prebuilt engine's key precedence.
 
+The Slice tab now shows a filament mapping card: project colours against what is
+physically on T0–T3, with warnings, a spool-swap plan, and a Confirm that binds
+to the mapping hash a start approval will later check.
+
 ## Next
 
-1. **Phase 6, filament mapping.** Read live `print_task_config`, show T0–T3,
-   compare source material and colour against what is loaded, manual remap,
-   mapping hash. The mapping hash is one of the values a start approval binds
-   to, so this is a prerequisite for Phase 9.
-2. **Phase 7** (slicing and review).
-3. **Phases 8–9** are the high-risk pair; see below.
+1. **Phase 7, slicing and review.** Foreground slicing with progress, cancel and
+   recovery; G-code extent validation; 3D and layer preview; the critical
+   settings summary; and the **output SHA-256**, which is the other value a
+   start approval binds to.
+2. **Phases 8–9** are the high-risk pair; see below. After Phase 7 both values
+   an approval needs — G-code hash and mapping hash — exist.
 
 ## The highest-risk item in the backlog
 
@@ -143,6 +148,11 @@ route through, but re-routing them is its own reviewed change (Phases 8–9).
 - **Machine identity is defined by the bundled U1 profile**, not by a denylist:
   any key `snapmaker_u1.json` defines is taken from there, and unrecognised
   `machine_*`/`printer_*` keys are dropped. A denylist would rot; this does not.
+- **Filament mapping proposes but never confirms**, and its confirmation is
+  stored against the mapping hash, so a spool swapped at the printer withdraws
+  it automatically — the same binding rule a start approval uses.
+- **`unknown` is not `empty`.** A toolhead the printer has not described blocks
+  the mapping rather than being assumed fine, and is never auto-suggested.
 - **Preparation happens at import, not at slice time**, because
   `HelixSliceRunner` is shared by the RN bridge and the prepare screen's own
   Slice button — sanitising at slice time from JS would leave that button
