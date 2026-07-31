@@ -16,6 +16,7 @@ import {
 import { printerConnectionUrl } from '../services/moonraker';
 import { getSharedMakerWorldLink, getSharedModelFile } from '../services/nativeSlicer';
 import { setPendingModel } from '../services/pendingModel';
+import { installNativeFileHasher } from '../services/security/NativeFileHasher';
 import { colors } from '../constants/theme';
 
 const theme = {
@@ -33,6 +34,10 @@ const theme = {
 export default function RootLayout() {
   useEffect(() => {
     initNotifications();
+    // Swaps in the native digest, but only after it has reproduced what the
+    // in-repo implementation produces. A failure here is not an error: the app
+    // keeps hashing correctly, just more slowly.
+    installNativeFileHasher().catch(() => {});
   }, []);
 
   return (

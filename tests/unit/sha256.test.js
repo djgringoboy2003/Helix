@@ -163,3 +163,34 @@ test('utf8ToBytes encodes multi-byte characters and surrogate pairs', () => {
     assert.deepEqual(utf8ToBytes(text), new Uint8Array(Buffer.from(text, 'utf8')), text);
   }
 });
+
+// --- the probe that lets a native digest be trusted ------------------------
+
+const { buildProbeBytes } = require(servicePath('security', 'HasherProbe.ts'));
+
+test('the hasher probe is built to catch a digest that cuts corners', () => {
+  // `installNativeFileHasher` will only hand SHA-256 over to the platform if it
+  // reproduces this file's digest exactly. That check is only worth anything if
+  // the fixture is hard to match by accident.
+  const bytes = buildProbeBytes();
+
+  // Larger than the native reader's 1 MiB block, so agreement means agreement
+  // across a block boundary rather than on a single buffer.
+  assert.ok(bytes.length > 1024 * 1024);
+  assert.notEqual(bytes.length % (1024 * 1024), 0);
+
+  // Every byte value appears, so a digest mishandling high bytes cannot pass.
+  const seen = new Set(bytes);
+  assert.equal(seen.size, 256);
+
+  // Not a repeating buffer: a hasher that re-read or reordered a block would
+  // otherwise still produce the right answer.
+  const first = bytes.slice(0, 4096);
+  const second = bytes.slice(4096, 8192);
+  assert.notDeepEqual(first, second);
+});
+
+test('the probe is deterministic, so a mismatch means a real disagreement', () => {
+  assert.deepEqual(buildProbeBytes(2048), buildProbeBytes(2048));
+  assert.equal(sha256Hex(buildProbeBytes(2048)), sha256Hex(buildProbeBytes(2048)));
+});

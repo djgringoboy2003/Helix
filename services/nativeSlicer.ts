@@ -154,6 +154,7 @@ type HelixSlicerModule = {
   clearLastSlice: () => Promise<boolean>;
   prepareTimelapseGcode: (path: string) => Promise<string>;
   uploadGcode: (baseUrl: string, filename: string, path: string) => Promise<NativeGcodeUpload>;
+  hashFileSha256: (path: string) => Promise<string>;
 };
 
 export type MakerWorldCookieDebug = {
@@ -590,6 +591,21 @@ export async function injectTimelapseMacros(gcodePath: string): Promise<string> 
   const outPath = `${FileSystem.cacheDirectory}tl_${base}`;
   await FileSystem.writeAsStringAsync(outPath, out.join(eol));
   return outPath;
+}
+
+/**
+ * Streaming SHA-256 from the native module, or null where there isn't one.
+ *
+ * Never installed as the app's hasher without being checked first — see
+ * `services/security/NativeFileHasher.ts`.
+ */
+export async function nativeHashFile(path: string): Promise<string | null> {
+  if (Platform.OS !== 'android' || !nativeModule?.hashFileSha256) return null;
+  try {
+    return await nativeModule.hashFileSha256(path.replace(/^file:\/\//, ''));
+  } catch {
+    return null;
+  }
 }
 
 export async function uploadGcodeToPrinter(

@@ -29,6 +29,7 @@ import okhttp3.RequestBody.Companion.asRequestBody
 import org.json.JSONObject
 import java.io.File
 import java.io.RandomAccessFile
+import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
 
 class HelixSlicerModule(
@@ -67,6 +68,41 @@ class HelixSlicerModule(
     }
 
     promise.resolve(status)
+  }
+
+  /**
+   * Streaming SHA-256 of a local file, lower-case hex.
+   *
+   * The identical digest is implemented in TypeScript in `services/security/`
+   * and is the authority — `docs/CURRENT_STATE.md` records that the primitive a
+   * start approval binds to stays inside the repository's own test suite. This
+   * exists only because reading a 30 MB G-code through the JS chunk reader costs
+   * seconds on a phone, and the JS side refuses to install it until it has
+   * checked the two agree (`installNativeFileHasher`).
+   *
+   * Read in 1 MiB blocks so a large plate never lands in memory whole.
+   */
+  @ReactMethod
+  fun hashFileSha256(path: String, promise: Promise) {
+    val file = File(path.removePrefix("file://"))
+    if (!file.isFile) {
+      promise.reject("HASH_FILE_MISSING", "No file at the given path")
+      return
+    }
+    try {
+      val digest = MessageDigest.getInstance("SHA-256")
+      file.inputStream().use { stream ->
+        val buffer = ByteArray(1 shl 20)
+        while (true) {
+          val read = stream.read(buffer)
+          if (read <= 0) break
+          digest.update(buffer, 0, read)
+        }
+      }
+      promise.resolve(digest.digest().joinToString("") { "%02x".format(it) })
+    } catch (error: Throwable) {
+      promise.reject("HASH_FAILED", error.message, error)
+    }
   }
 
   @ReactMethod
