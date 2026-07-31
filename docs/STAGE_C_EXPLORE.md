@@ -158,11 +158,11 @@ suite; two need a person, a phone and a MakerWorld account.
 | 418 / captcha flow | → `captcha-required`, body deleted |
 | Large file rejection | Declared size, received bytes, and an oversized blob rejected before decoding |
 | Invalid redirect rejection | `checkRedirectChain` — every hop checked, not just the last |
-| **Logged-in flow** | **Device only** — needs a real account and a real CAPTCHA |
+| **Logged-in flow** | **Confirmed on device**, 2026-07-31, release APK at `7bce4f8` — a real logged-in MakerWorld download reached the Slice tab and sliced. See `docs/CURRENT_STATE.md`. |
 
-Live back/forward history and the real logged-in download also need the device;
-`canGoBack` / `canGoForward` come from the WebView, so there is no logic of ours
-to assert on.
+The real logged-in download has since been confirmed on device (see above). Live
+back/forward history still needs one; `canGoBack` / `canGoForward` come from the
+WebView, so there is no logic of ours to assert on.
 
 ## Deliberately not done in Stage C
 

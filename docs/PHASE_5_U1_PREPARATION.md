@@ -150,6 +150,7 @@ model part appears anywhere in a plan.
 | `npx eslint` on all changed paths | **Pass**, 0 errors |
 | `npx expo export --platform android` | **Pass** — 4.27 MB Hermes bundle |
 | `cd android && ./gradlew assembleRelease` | **Pass** — `BUILD SUCCESSFUL in 2m 33s` |
+| On device, real Bambu project | **Pass** — 2026-07-31, device `53b451df`, release APK at `7bce4f8`. The retarget ran on a logged-in MakerWorld download and reported its replaced / removed / brought-into-range summary; the file then sliced correctly. |
 
 The 5 `eslint` warnings in `app/(tabs)/slicer.tsx` are pre-existing, in regions
 this phase did not touch.

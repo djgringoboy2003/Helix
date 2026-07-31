@@ -122,6 +122,7 @@ identity came from RFID, so it is not the operator's to redeclare.
 | `npx eslint` on all changed paths | **Pass**, 0 errors |
 | `npx expo export --platform android` | **Pass** — 4.29 MB Hermes bundle |
 | `cd android && ./gradlew assembleRelease` | **Pass** — `BUILD SUCCESSFUL in 1m 53s` |
+| On device, real MakerWorld project | **Pass** — 2026-07-31, device `53b451df`, release APK at `7bce4f8`. The card rendered with a row per project colour and T0–T3 chips. Note that confirming the mapping does **not** yet change what is sliced, so this run does not exercise the mapping's effect on output. |
 
 The 5 `eslint` warnings in `app/(tabs)/slicer.tsx` are pre-existing, in regions
 this phase did not touch.

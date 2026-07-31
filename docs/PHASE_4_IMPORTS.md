@@ -147,6 +147,7 @@ behind.
 | `npx eslint` on all changed paths | **Pass**, 0 errors |
 | `npx expo export --platform android` | **Pass** — 4.25 MB Hermes bundle |
 | `cd android && ./gradlew assembleRelease` | **Pass** — `BUILD SUCCESSFUL in 1m 48s` |
+| On device, real MakerWorld download | **Pass** — 2026-07-31, device `53b451df`, release APK at `7bce4f8`. A logged-in download went through the funnel and reached the slicer. The **rejection** paths were not exercised on device; they remain covered by the suite only. |
 
 `eslint` reports 5 pre-existing warnings in `app/(tabs)/slicer.tsx` (unused
 variables and one `exhaustive-deps`), all in regions this phase did not touch.

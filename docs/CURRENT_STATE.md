@@ -28,12 +28,40 @@ existing behaviour behind safety gates, not building new — see
 | C fix | `957843d` | `DownloadIo` returns HTTP status and content type, so a 403 or 418 page is no longer written to disk and hashed as a model. |
 | 4 — unified imports | `683e32f` | `services/import/{ImportCoordinator,ImportTypes,ImportLibrary,ThreeMfInspector,ExpoImportIo}.ts`. `docs/PHASE_4_IMPORTS.md`. |
 | 5 — U1 preparation | `02e60a6` | `services/prepare/`, `U1ProjectRewriter.kt`, `PreparationReportCard.tsx`. `docs/PHASE_5_U1_PREPARATION.md`. |
-| 6 — filament mapping | pending commit | `services/filament/`, `FilamentMappingCard.tsx`. `docs/PHASE_6_FILAMENT_MAPPING.md`. |
+| 6 — filament mapping | `7bce4f8` | `services/filament/`, `FilamentMappingCard.tsx`. `docs/PHASE_6_FILAMENT_MAPPING.md`. |
 
-Backlog phases 0–6 are complete except the two Phase 3 acceptance tests that
-need a device and a real MakerWorld account (logged-in download, live navigation
-history). Phase 1 (branding, icons, app identity) was **not** done — the app is
-still `Helix` / `org.crabcore.u1control` / 1.2.8.
+Backlog phases 0–6 are complete. Phase 1 (branding, icons, app identity) was
+**not** done — the app is still `Helix` / `org.crabcore.u1control` / 1.2.8.
+
+## On-device verification, 2026-07-31
+
+Phases 4–6 were exercised end to end on device `53b451df` (ARM64, `A065`) with
+the release APK at `7bce4f8`, against a **real logged-in MakerWorld download**.
+Confirmed by the operator:
+
+1. The retarget ran and reported itself — `Retargeting … for the U1`, then the
+   replaced / removed / brought-into-range summary.
+2. The filament mapping card rendered, with a row per project colour and T0–T3
+   chips.
+3. The slice succeeded and the G-code preview was correct.
+
+This also closes the Phase 3 acceptance test that needed a person, a phone and a
+real account: **logged-in download**. Live back/forward navigation history is
+still unexercised, and remains the one outstanding Phase 3 item.
+
+Not covered by that run, and still unverified on device:
+
+- The import **rejection** paths. No corrupt, traversal-carrying or
+  geometry-free file was tried; those are covered by the suite only.
+- Whether the mapping *affects* slicing — by design it does not yet. Slicing
+  still uses the tab's existing `toolRemap` path, so a correct slice does not
+  currently depend on the mapping being right. That wiring is Phases 8–9.
+
+**Capturing a device run:** this phone's logcat ring buffer defaults to 256 KiB,
+which holds roughly four minutes and had already rotated past the session. Run
+`adb -s <id> logcat -G 16M` and `logcat -c` *before* the run; the setting resets
+on reboot. `run-as` cannot read app storage — release builds are not
+debuggable — so logs are the only route in.
 
 All four import doors — file picker, Android share, open-with, MakerWorld — now
 run through `ImportCoordinator`, so `ThreeMfSecurityScanner` is finally called on
