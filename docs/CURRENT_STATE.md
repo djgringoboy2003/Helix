@@ -29,8 +29,10 @@ existing behaviour behind safety gates, not building new — see
 | 4 — unified imports | `683e32f` | `services/import/{ImportCoordinator,ImportTypes,ImportLibrary,ThreeMfInspector,ExpoImportIo}.ts`. `docs/PHASE_4_IMPORTS.md`. |
 | 5 — U1 preparation | `02e60a6` | `services/prepare/`, `U1ProjectRewriter.kt`, `PreparationReportCard.tsx`. `docs/PHASE_5_U1_PREPARATION.md`. |
 | 6 — filament mapping | `7bce4f8` | `services/filament/`, `FilamentMappingCard.tsx`. `docs/PHASE_6_FILAMENT_MAPPING.md`. |
+| 7 — slicing and review | pending commit | `services/gcode/`, `SliceReviewCard.tsx`. `docs/PHASE_7_SLICE_REVIEW.md`. |
+| 8 — upload-only | pending commit | `services/upload/UploadService.ts`. `docs/PHASE_8_UPLOAD_ONLY.md`. **Additive only — the cutover is Phase 9.** |
 
-Backlog phases 0–6 are complete. Phase 1 (branding, icons, app identity) was
+Backlog phases 0–8 are complete. Phase 1 (branding, icons, app identity) was
 **not** done — the app is still `Helix` / `org.crabcore.u1control` / 1.2.8.
 
 ## On-device verification, 2026-07-31
@@ -79,14 +81,27 @@ The Slice tab now shows a filament mapping card: project colours against what is
 physically on T0–T3, with warnings, a spool-swap plan, and a Confirm that binds
 to the mapping hash a start approval will later check.
 
+Both values a start approval binds to now exist: the **G-code SHA-256** from
+Phase 7's review, and the **filament mapping hash** from Phase 6. The upload half
+of the replacement flow exists and is tested. What does not exist is the
+approved-start path.
+
 ## Next
 
-1. **Phase 7, slicing and review.** Foreground slicing with progress, cancel and
-   recovery; G-code extent validation; 3D and layer preview; the critical
-   settings summary; and the **output SHA-256**, which is the other value a
-   start approval binds to.
-2. **Phases 8–9** are the high-risk pair; see below. After Phase 7 both values
-   an approval needs — G-code hash and mapping hash — exist.
+**Phase 9, safe start — and the cutover, in one move.** This is the change the
+whole backlog has been building towards, and the one flagged since Stage A as
+the highest-blast-radius edit in the project.
+
+It has to be one change because the halves cannot ship apart: removing
+`startPrint` from the three call sites without the approved-start path would
+leave the app able to upload and unable to print. Phase 8 therefore left them
+alone deliberately — see `docs/PHASE_8_UPLOAD_ONLY.md`.
+
+The move is: re-route `app/(tabs)/slicer.tsx`, `app/(tabs)/index.tsx` and
+`app/(tabs)/files.tsx` onto `PrintJobMachine` + `ApprovalService` +
+`uploadSlicedGcode` + a new start path, together, with the fresh-camera check,
+the bed-clear prompt and hold-to-start in place, and Phase 7's review promoted
+from displayed to enforced.
 
 ## The highest-risk item in the backlog
 

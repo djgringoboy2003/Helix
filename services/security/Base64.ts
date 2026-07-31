@@ -108,3 +108,48 @@ export function utf8ToBytes(text: string): Uint8Array {
   }
   return Uint8Array.from(out);
 }
+
+/**
+ * Decodes UTF-8 bytes to a string, replacing anything malformed.
+ *
+ * Replacement rather than throwing is deliberate: this decodes G-code read from
+ * disk in chunks, and a multi-byte character split across a chunk boundary must
+ * not abort a review. Only comments in a G-code file can hold non-ASCII, so a
+ * replacement character can never corrupt a command.
+ */
+export function bytesToUtf8(bytes: Uint8Array): string {
+  let out = '';
+  let at = 0;
+  while (at < bytes.length) {
+    const byte = bytes[at];
+    if (byte < 0x80) {
+      out += String.fromCharCode(byte);
+      at += 1;
+      continue;
+    }
+    const length = byte >= 0xf0 ? 4 : byte >= 0xe0 ? 3 : byte >= 0xc0 ? 2 : 0;
+    if (length === 0 || at + length > bytes.length) {
+      out += '�';
+      at += 1;
+      continue;
+    }
+    let code = byte & (0xff >> (length + 1));
+    let valid = true;
+    for (let i = 1; i < length; i += 1) {
+      const next = bytes[at + i];
+      if ((next & 0xc0) !== 0x80) {
+        valid = false;
+        break;
+      }
+      code = (code << 6) | (next & 0x3f);
+    }
+    if (!valid) {
+      out += '�';
+      at += 1;
+      continue;
+    }
+    out += code > 0xffff ? String.fromCodePoint(code) : String.fromCharCode(code);
+    at += length;
+  }
+  return out;
+}

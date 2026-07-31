@@ -32,6 +32,7 @@ import {
   openNativeGcodePreview,
   openNativeModelPreview,
   injectTimelapseMacros,
+  getU1PrinterProfile,
   pickModelFile,
   readProjectSettings,
   setFilamentSlotColors,
@@ -65,6 +66,10 @@ import {
 } from '../../services/filament/FilamentSlots';
 import { planFilamentMapping } from '../../services/filament/FilamentMappingPlanner';
 import FilamentMappingCard from '../../components/FilamentMappingCard';
+import { buildVolumeOf } from '../../services/prepare/U1ProjectPreparer';
+import { reviewSlicedGcode, type SliceReview } from '../../services/gcode/SliceReview';
+import { expoGcodeIo } from '../../services/gcode/ExpoGcodeIo';
+import SliceReviewCard from '../../components/SliceReviewCard';
 import { setPrintSentNotice } from '../../services/printSentBus';
 import PrintPreprocessDialog, { type PrintPref } from '../../components/PrintPreprocessDialog';
 import { api, printerConnectionUrl, thumbnailUrl } from '../../services/moonraker';
@@ -173,6 +178,9 @@ export default function SliceLabScreen() {
   const [mappingConfirmed, setMappingConfirmed] = useState<{ at: number; hash: string } | null>(
     null
   );
+  // What was read back out of the sliced G-code, including the SHA-256 a start
+  // approval will bind to. Null until a slice exists and has been read.
+  const [sliceReview, setSliceReview] = useState<SliceReview | null>(null);
   const [extracting, setExtracting] = useState(false);
   const [extractProgress, setExtractProgress] = useState<{ percent: number; phase: string } | null>(null);
   const [sayingIdx, setSayingIdx] = useState(0);
@@ -255,6 +263,7 @@ export default function SliceLabScreen() {
     if (!filamentPlan?.ok) return;
     setMappingConfirmed({ at: Date.now(), hash: filamentPlan.mapHash });
   }, [filamentPlan]);
+
 
   // Keep native paint/preview prefs aligned with the saved slot colours.
   useEffect(() => {
@@ -1147,6 +1156,39 @@ export default function SliceLabScreen() {
     };
   }, [slicedGcodePath]);
 
+  /**
+   * Review whatever G-code currently exists, whichever path produced it.
+   *
+   * Keyed on the output path rather than hooked into each slice call site, so a
+   * first slice, a per-colour re-slice and a result restored by `syncLastSlice`
+   * are all reviewed the same way. It reads the finished file, after the native
+   * post-processes have run, so its SHA-256 describes the bytes that would
+   * actually be uploaded.
+   */
+  useEffect(() => {
+    let active = true;
+    setSliceReview(null);
+    if (!slicedGcodePath) return;
+
+    (async () => {
+      const volume = buildVolumeOf(
+        JSON.parse(await getU1PrinterProfile()) as Record<string, string | string[]>,
+      );
+      if (!volume) return;
+      const review = await reviewSlicedGcode(
+        { filePath: slicedGcodePath, volume, expectedPrinterModel: 'Snapmaker U1' },
+        expoGcodeIo,
+      );
+      if (active) setSliceReview(review);
+    })().catch(() => {
+      // No review rather than a misleading one; the card simply does not show.
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [slicedGcodePath]);
+
   return (
     <>
     <ScrollView
@@ -1221,6 +1263,7 @@ export default function SliceLabScreen() {
           </View>
         ) : null}
         {hasModel ? <PreparationReportCard report={prepareReport} /> : null}
+        {sliceReview ? <SliceReviewCard review={sliceReview} /> : null}
         {hasModel && filamentPlan ? (
           <FilamentMappingCard
             plan={filamentPlan}
