@@ -69,6 +69,13 @@ export type GateResult =
   | { ok: true }
   | { ok: false; code: PrintJobErrorCode; message: string; details?: Record<string, string | number | boolean> };
 
+/** A gate that said no. Carries the code and the operator-facing reason. */
+export type GateFailure = Extract<GateResult, { ok: false }>;
+
+export function isGateFailure(result: GateResult): result is GateFailure {
+  return !result.ok;
+}
+
 export const GATE_OK: GateResult = { ok: true };
 
 export function gateFailure(

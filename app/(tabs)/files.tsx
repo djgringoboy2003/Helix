@@ -10,7 +10,14 @@ import {
 } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useMoonraker } from '../../hooks/useMoonraker';
-import { api, FileEntry, printerConnectionUrl, thumbnailUrl } from '../../services/moonraker';
+import {
+  api,
+  FileEntry,
+  fileUrl,
+  printerConnectionUrl,
+  resolveSnapshotUrl,
+  thumbnailUrl,
+} from '../../services/moonraker';
 import HistoryView from '../../components/HistoryView';
 import TimelapseView from '../../components/TimelapseView';
 import { t } from '../../services/i18n';
@@ -21,8 +28,10 @@ import PrintPreprocessDialog, { type PrintPref } from '../../components/PrintPre
 import type { FilamentSlotDisplay } from '../../components/FilamentSlotsEditor';
 import { normalizeFilamentSlotColors } from '../../constants/filamentColors';
 import * as FileSystem from 'expo-file-system/legacy';
-import { fileUrl } from '../../services/moonraker';
 import { uploadGcodeToPrinter } from '../../services/nativeSlicer';
+import ThemedDialog from '../../components/ThemedDialog';
+import { useReprintApproval } from '../../hooks/useReprintApproval';
+import StartApprovalDialog from '../../components/StartApprovalDialog';
 
 // path|modified -> thumbnail URL, null = file genuinely has no thumbnail.
 // cached at module level so scrolling doesn't re-hit /server/files/metadata
@@ -100,6 +109,7 @@ export default function FilesScreen() {
   const [selectedPrinterId, setSelectedPrinterId] = useState(settings.activePrinterId);
   const [printerStatuses, setPrinterStatuses] = useState<Record<string, { label: string; busy: boolean; selectable: boolean }>>({});
   const { showAlert, alertDialog } = useThemedAlert();
+  const reprintApproval = useReprintApproval();
 
   const printState: string = status.print_stats?.state ?? '';
 
@@ -245,6 +255,16 @@ export default function FilesScreen() {
     });
   }, []);
 
+  // Prepares a reprint and stops.
+  //
+  // This used to remap, upload and start from one tap. It now ends by handing
+  // the file to the approval gate: `useReprintApproval` reads whatever is on the
+  // target printer back, hashes it, and will not let it start without a live bed
+  // image and an explicit operator hold.
+  //
+  // Reading the file back after a remap-and-upload is not wasted work — it is
+  // how the bytes that will print get verified end to end, rather than the app
+  // assuming the upload landed exactly as it was written locally.
   const reprint = useCallback(async (prefs: Readonly<Record<PrintPref, boolean>>) => {
     if (!selectedFile || !activeUrl || !selectedPrinter?.url) return;
     const targetUrl = selectedPrinter.url;
@@ -258,11 +278,7 @@ export default function FilesScreen() {
           `This file was sliced for ${materialMismatch.fileMaterial}, but ${materialMismatch.slotName} is loaded in T${materialMismatch.loadedSlot}. Re-slice the model with the loaded material before printing.`,
         );
       }
-      await api.runGcode(
-        targetUrl,
-        `SET_MAIN_STATE MAIN_STATE=IDLE\nSET_PRINT_PREFERENCES BED_LEVEL=${prefs.autoLevel ? 1 : 0} TIME_LAPSE_CAMERA=${prefs.timelapse ? 1 : 0} FLOW_CALIBRATE=${prefs.flowCal ? 1 : 0} FLOW_CALIBRATE_EXTRUDERS=0,1,2,3`,
-      );
-      setSendProgress(0.65);
+
       let printPath = selectedFile.path;
       if (targetUrl !== activeUrl || Object.entries(assignments).some(([fileTool, loadedSlot]) => Number(fileTool) !== loadedSlot)) {
         const sourcePath = `${FileSystem.cacheDirectory ?? ''}helix-reprint-source-${Date.now()}.gcode`;
@@ -275,17 +291,23 @@ export default function FilesScreen() {
         const uploaded = await uploadGcodeToPrinter(targetUrl, uploadName, outputPath);
         printPath = uploaded?.path ?? uploadName;
       }
-      await api.startPrint(targetUrl, printPath);
       setSendProgress(1);
-      const printed = printPath;
       closePrintModal();
-      showAlert({ title: t('Print started'), message: printed, icon: 'check-circle' });
+      // The remap has already baked the assignments into the uploaded file, so
+      // the toolheads it drives are physical ones — the mapping the approval
+      // binds to is read from the file itself, not from the dialog.
+      await reprintApproval.prepare({
+        baseUrl: targetUrl,
+        printerId: selectedPrinter.id,
+        remotePath: printPath,
+        prefs,
+      });
     } catch (e: any) {
       setModalError(String(e?.message ?? e));
     } finally {
       setSending(false);
     }
-  }, [activeUrl, assignments, closePrintModal, selectedFile, showAlert]);
+  }, [activeUrl, assignments, availableSlots, closePrintModal, reprintApproval, selectedFile, selectedMeta, selectedPrinter]);
 
   const empty = useMemo(
     () => (
@@ -376,8 +398,52 @@ export default function FilesScreen() {
         progress={sendProgress}
         errorMessage={modalError}
         onSend={reprint}
-        sendLabel="Print Again"
+        sendLabel="Prepare"
       />
+
+      {reprintApproval.state.stage === 'preparing' ? (
+        <ThemedDialog
+          visible
+          title={t('Checking the file')}
+          message={`${reprintApproval.state.message ?? ''} ${Math.round(reprintApproval.state.progress * 100)}%`}
+          icon="file-search-outline"
+          onClose={reprintApproval.reset}
+          actions={[{ text: t('Cancel'), onPress: reprintApproval.reset }]}
+        />
+      ) : null}
+
+      {reprintApproval.state.stage === 'idle' && reprintApproval.state.error ? (
+        <ThemedDialog
+          visible
+          title={t('Cannot print this file')}
+          message={reprintApproval.state.error}
+          icon="alert-octagon-outline"
+          onClose={reprintApproval.reset}
+          actions={[{ text: t('OK'), onPress: reprintApproval.reset, variant: 'primary' }]}
+        />
+      ) : null}
+
+      {reprintApproval.state.job && reprintApproval.state.review && reprintApproval.state.filename ? (
+        <StartApprovalDialog
+          visible
+          job={reprintApproval.state.job}
+          review={reprintApproval.state.review}
+          filename={reprintApproval.state.filename}
+          cameraSnapshotUrl={resolveSnapshotUrl(undefined, settings.cameraUrl, selectedPrinter?.url || activeUrl)}
+          cameraEndpoint={settings.cameraUrl}
+          starting={reprintApproval.state.stage === 'starting'}
+          statusMessage={reprintApproval.state.message}
+          errorMessage={reprintApproval.state.error}
+          onCancel={reprintApproval.reset}
+          onStart={(result) => {
+            reprintApproval.confirm(result).then((started) => {
+              if (started) {
+                showAlert({ title: t('Print started'), message: started, icon: 'check-circle' });
+              }
+            });
+          }}
+        />
+      ) : null}
     </>
   );
 }

@@ -328,6 +328,14 @@ export const api = {
   listFilesRoot: (base: string, root: string) =>
     request<FileEntry[]>(base, `/server/files/list?root=${encodeURIComponent(root)}`),
 
+  // Moonraker reports free space alongside a directory listing; there is no
+  // dedicated disk endpoint. Older builds omit disk_usage entirely.
+  directoryInfo: (base: string, path: string) =>
+    request<{ disk_usage?: { total?: number; used?: number; free?: number } }>(
+      base,
+      `/server/files/directory?path=${encodeURIComponent(path)}&extended=false`
+    ),
+
   startPrint: (base: string, filename: string) =>
     request(base, `/printer/print/start?filename=${encodeURIComponent(filename)}`, { method: 'POST' }),
 

@@ -48,6 +48,8 @@ import {
 } from '../../components/ui';
 import { t } from '../../services/i18n';
 import { takePrintSentNotice, type PrintSentNotice } from '../../services/printSentBus';
+import { useReprintApproval } from '../../hooks/useReprintApproval';
+import StartApprovalDialog from '../../components/StartApprovalDialog';
 import { displayTemperature } from '../../services/temperature';
 import type { TemperatureUnit } from '../../services/temperature';
 import { colors, radius, shadow, spacing, withAlpha } from '../../constants/theme';
@@ -201,6 +203,7 @@ export default function Dashboard() {
   const [estopConfirmOpen, setEstopConfirmOpen] = useState(false);
   const [estopDontAsk, setEstopDontAsk] = useState(false);
   const [printSentNotice, setPrintSentNotice] = useState<PrintSentNotice | null>(null);
+  const reprintApproval = useReprintApproval();
 
   useFocusEffect(
     useCallback(() => {
@@ -444,13 +447,17 @@ export default function Dashboard() {
     setDismissedJob('');
   }, [activeJob, filename]);
 
+  // Reprinting is a start, so it goes through the same gate as everything else:
+  // the file is read back and hashed, the mapping is rebuilt from what the file
+  // actually drives, and the operator approves against a live bed image. There
+  // is no "we printed this before" shortcut.
   const reprint = async () => {
-    if (!filename) return;
-    try {
-      await api.startPrint(activeUrl, filename);
-    } catch (e: unknown) {
-      showErr(e);
-    }
+    if (!filename || !activeUrl) return;
+    await reprintApproval.prepare({
+      baseUrl: activeUrl,
+      printerId: settings.activePrinterId,
+      remotePath: filename,
+    });
   };
 
   const switchPrinter = (p: (typeof settings.printers)[number]) => {
@@ -1064,6 +1071,48 @@ export default function Dashboard() {
           <Text style={styles.estopDontAskText}>{t("Don't ask again")}</Text>
         </Pressable>
       </ThemedDialog>
+
+      {reprintApproval.state.stage === 'preparing' ? (
+        <ThemedDialog
+          visible
+          title={t('Checking the file')}
+          message={`${reprintApproval.state.message ?? ''} ${Math.round(reprintApproval.state.progress * 100)}%`}
+          icon="file-search-outline"
+          onClose={reprintApproval.reset}
+          actions={[{ text: t('Cancel'), onPress: reprintApproval.reset }]}
+        />
+      ) : null}
+
+      {reprintApproval.state.stage === 'idle' && reprintApproval.state.error ? (
+        <ThemedDialog
+          visible
+          title={t('Cannot print this file')}
+          message={reprintApproval.state.error}
+          icon="alert-octagon-outline"
+          onClose={reprintApproval.reset}
+          actions={[{ text: t('OK'), onPress: reprintApproval.reset, variant: 'primary' }]}
+        />
+      ) : null}
+
+      {reprintApproval.state.job && reprintApproval.state.review && reprintApproval.state.filename ? (
+        <StartApprovalDialog
+          visible
+          job={reprintApproval.state.job}
+          review={reprintApproval.state.review}
+          filename={reprintApproval.state.filename}
+          cameraSnapshotUrl={mainSnapshotUrl}
+          cameraEndpoint={settings.cameraUrl}
+          starting={reprintApproval.state.stage === 'starting'}
+          statusMessage={reprintApproval.state.message}
+          errorMessage={reprintApproval.state.error}
+          onCancel={reprintApproval.reset}
+          onStart={(result) => {
+            reprintApproval.confirm(result).then((started) => {
+              if (started) setPrintSentNotice({ filename: started });
+            });
+          }}
+        />
+      ) : null}
     </SafeAreaView>
   );
 }

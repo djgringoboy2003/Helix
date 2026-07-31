@@ -35,6 +35,43 @@ test('extents cover both ends of every extruding move', () => {
   assert.equal(extents.extrudingMoves, 1);
 });
 
+// --- which toolheads a file actually drives --------------------------------
+
+test('only toolheads that extrude count as used', () => {
+  // A tool selected for a wipe or a temperature command but never extruded with
+  // is not a tool the print needs loaded, and must not reach
+  // SET_PRINT_USED_EXTRUDERS.
+  const extents = scanGcode(
+    [
+      'G90', 'M82',
+      'T0', 'G1 X10 Y10 Z0.2', 'G1 X20 Y20 E1',
+      'T2', 'G1 X30 Y30 F9000',
+      'T1', 'G1 X40 Y40 E2',
+    ].join('\n')
+  );
+
+  assert.deepEqual(extents.toolsUsed, [0, 1]);
+});
+
+test('a file with no tool changes drives T0', () => {
+  const extents = scanGcode(['G90', 'M82', 'G1 X10 Y10 Z0.2', 'G1 X20 Y20 E1'].join('\n'));
+  assert.deepEqual(extents.toolsUsed, [0]);
+});
+
+test('a tool change is a bare T word, not any line starting with T', () => {
+  const extents = scanGcode(
+    ['G90', 'M82', 'M104 T3 S200', 'TIMELAPSE_TAKE_FRAME', 'G1 X20 Y20 E1'].join('\n')
+  );
+  assert.deepEqual(extents.toolsUsed, [0]);
+});
+
+test('a trailing comment does not hide a tool change', () => {
+  const extents = scanGcode(
+    ['G90', 'M82', 'T1 ; switch to the second head', 'G1 X20 Y20 E1'].join('\n')
+  );
+  assert.deepEqual(extents.toolsUsed, [1]);
+});
+
 test('travel moves are excluded, so a purge or park does not widen the print', () => {
   const extents = scanGcode(
     ['G90', 'M82', 'G1 X250 Y250 F9000', 'G1 X10 Y10 Z0.2', 'G1 X20 Y20 E1'].join('\n')

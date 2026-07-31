@@ -72,8 +72,22 @@ import { expoGcodeIo } from '../../services/gcode/ExpoGcodeIo';
 import SliceReviewCard from '../../components/SliceReviewCard';
 import { setPrintSentNotice } from '../../services/printSentBus';
 import PrintPreprocessDialog, { type PrintPref } from '../../components/PrintPreprocessDialog';
-import { api, printerConnectionUrl, thumbnailUrl } from '../../services/moonraker';
+import { api, printerConnectionUrl, resolveSnapshotUrl, thumbnailUrl } from '../../services/moonraker';
 import { resolveNativeMaterialProfiles } from '../../services/filamentProfiles';
+import { uploadSlicedGcode } from '../../services/upload/UploadService';
+import { createStartIo, createUploadIo } from '../../services/printer/MoonrakerPrinterIo';
+import {
+  startApprovedPrint,
+  type UploadedFileFingerprint,
+} from '../../services/start/StartService';
+import { buildFilamentMapping, buildStartJob, newJobId } from '../../services/start/StartJob';
+import { createStartApproval } from '../../services/jobs/ApprovalService';
+import { grantStartApproval } from '../../services/jobs/PrintJobMachine';
+import { getPrintJobRepository } from '../../services/jobs/AsyncStorageJobStorage';
+import type { PrintJob } from '../../services/jobs/PrintJobTypes';
+import StartApprovalDialog, {
+  type StartApprovalResult,
+} from '../../components/StartApprovalDialog';
 
 const MW_DESIGN_RE = /(?:https?:\/\/)?(?:www\.)?makerworld\.com\/(?:\w+\/)?models\/(\d+)/i;
 // The specific print profile/instance the user is viewing, e.g.
@@ -116,6 +130,25 @@ type PrintStartState =
   | { state: 'starting'; message: string }
   | { state: 'done'; message: string }
   | { state: 'error'; message: string };
+
+/**
+ * Everything the start gate will be asked to re-check.
+ *
+ * Held as one object rather than as loose state because these values only mean
+ * anything together: the job binds to the review's hash, which describes the
+ * bytes behind the fingerprint, which the printer must still be holding. Losing
+ * one of them would leave an approval that validates against nothing.
+ */
+type ApprovalState =
+  | { state: 'idle' }
+  | {
+      state: 'awaiting';
+      job: PrintJob;
+      review: SliceReview;
+      filename: string;
+      uploaded: UploadedFileFingerprint;
+      prefs: Readonly<Record<PrintPref, boolean>>;
+    };
 
 type ToolLoadStatus = 'loaded' | 'empty' | 'busy' | 'unknown';
 
@@ -191,6 +224,10 @@ export default function SliceLabScreen() {
   // (multi-colour stays multi-colour). null = use the sliced tools as-is.
   const [toolRemap, setToolRemap] = useState<Record<number, number> | null>(null);
   const [preprocessOpen, setPreprocessOpen] = useState(false);
+  // The uploaded-and-waiting job. Nothing here can move the printer; reaching
+  // motion needs `startApprovedPrint`, which re-checks all of it against the
+  // machine first.
+  const [approval, setApproval] = useState<ApprovalState>({ state: 'idle' });
   const [sendProgress, setSendProgress] = useState(0);
   const [perToolGrams, setPerToolGrams] = useState<number[]>([]);
   const [printPrefs, setPrintPrefs] = useState<Record<PrintPref, boolean>>({
@@ -944,9 +981,13 @@ export default function SliceLabScreen() {
     [settings.printers, settings.activePrinterId, updateSettings],
   );
 
-  // The dialog's Print button: upload the sliced gcode, verify it, then start —
-  // all in one go, driving the dialog's progress bar.
-  const uploadAndPrint = useCallback(async (
+  // The dialog's button: prepare the bytes and upload them, and stop there.
+  //
+  // This used to slice, upload and start from one tap. `CLAUDE.md` forbids
+  // starting after slicing or after upload, so the flow now ends with a file on
+  // the printer and a job waiting for an operator — `confirmStart` below is the
+  // only thing that reaches motion, and it re-checks everything first.
+  const uploadForApproval = useCallback(async (
     requestedPrefs: Readonly<Record<PrintPref, boolean>>,
   ) => {
     if (slice.state !== 'success') return;
@@ -976,7 +1017,9 @@ export default function SliceLabScreen() {
     const requiredToolMask = wantsReslice
       ? targets.reduce((mask, t) => mask | (1 << t), 0)
       : fileRequiredMask;
-    const usedExtruders = [0, 1, 2, 3].filter((tool) => (requiredToolMask & (1 << tool)) !== 0);
+    // The toolheads the print will drive are no longer sent from here: they are
+    // derived from the job's filament mapping at start time, so the command the
+    // printer receives comes from the same mapping the approval binds to.
     const missingTools = missingLoadedTools(toolLoad, requiredToolMask);
     if (missingTools) {
       setPrintStart({ state: 'error', message: `Load filament in ${missingTools} before printing.` });
@@ -1037,74 +1080,198 @@ export default function SliceLabScreen() {
       setSendProgress(0.12);
       // Timelapse is gcode-driven: the printer only records frames if the gcode
       // itself calls the TIMELAPSE_* macros at each layer. Inject them before
-      // upload when the toggle is on (SET_PRINT_PREFERENCES below just arms the
-      // firmware preference; the frame captures have to live in the gcode).
+      // upload when the toggle is on (SET_PRINT_PREFERENCES at start time just
+      // arms the firmware preference; the frame captures live in the gcode).
       let uploadPath = gcodePath;
       if (requestedPrefs.timelapse) {
         setPrintStart({ state: 'starting', message: 'Preparing timelapse…' });
         uploadPath = await injectTimelapseMacros(gcodePath);
       }
-      const requestedName = buildPrinterUploadFilename(sourceName, gcodePath);
-      const uploaded = await uploadGcodeToPrinter(activeUrl, requestedName, uploadPath);
-      setSendProgress(0.55);
-      const uploadedName = uploaded && 'filename' in uploaded ? uploaded.filename : requestedName;
-      const moonrakerPath = uploadedPathFromResponse(uploaded, uploadedName);
-      setPrintStart({ state: 'starting', message: 'Verifying…' });
-      const verifiedPath = await verifyUploadedGcode(activeUrl, moonrakerPath, uploadedName);
-      setSendProgress(0.8);
-      // Firmware caches these per-printer, so always send every preference explicitly —
-      // otherwise a previous print's toggle state can leak into this one.
-      setPrintStart({ state: 'starting', message: 'Applying print preferences…' });
-      const before = await api.queryObjects<{
-        print_stats?: { state?: string };
-      }>(activeUrl, ['print_stats']);
-      const currentState = before.status?.print_stats?.state;
-      if (currentState === 'printing' || currentState === 'paused') {
-        throw new Error(`Printer is already ${currentState}.`);
-      }
-      await api.runGcode(
-        activeUrl,
-        `SET_MAIN_STATE MAIN_STATE=IDLE\nSET_PRINT_USED_EXTRUDERS EXTRUDERS=${usedExtruders.join(',')}\nSET_PRINT_PREFERENCES BED_LEVEL=${requestedPrefs.autoLevel ? 1 : 0} TIME_LAPSE_CAMERA=${requestedPrefs.timelapse ? 1 : 0} FLOW_CALIBRATE=${requestedPrefs.flowCal ? 1 : 0} FLOW_CALIBRATE_EXTRUDERS=0,1,2,3`,
+
+      // Review the bytes that are actually about to be sent. The card on the
+      // screen describes `slice.result.gcodePath`, and a re-slice or a timelapse
+      // injection has since produced a different file — binding an approval to
+      // the earlier hash would bind it to bytes nobody is uploading.
+      setPrintStart({ state: 'starting', message: 'Checking the G-code…' });
+      const volume = buildVolumeOf(
+        JSON.parse(await getU1PrinterProfile()) as Record<string, string | string[]>,
       );
-      const applied = await api.queryObjects<{
-        print_task_config?: {
-          auto_bed_leveling?: boolean;
-          time_lapse_camera?: boolean;
-          flow_calibrate?: boolean;
-          flow_calib_extruders?: boolean[];
-          extruders_used?: boolean[];
-        };
-      }>(activeUrl, ['print_task_config']);
-      const taskConfig = applied.status?.print_task_config;
-      if (
-        taskConfig?.auto_bed_leveling !== requestedPrefs.autoLevel ||
-        taskConfig?.time_lapse_camera !== requestedPrefs.timelapse ||
-        taskConfig?.flow_calibrate !== requestedPrefs.flowCal ||
-        taskConfig?.flow_calib_extruders?.length !== 4 ||
-        !taskConfig?.flow_calib_extruders?.every(Boolean) ||
-        taskConfig?.extruders_used?.length !== 4 ||
-        !taskConfig?.extruders_used?.every((used, tool) => used === usedExtruders.includes(tool))
-      ) {
-        throw new Error('Printer rejected the selected print preferences.');
+      if (!volume) throw new Error('The U1 build volume could not be read, so nothing was uploaded.');
+      const review = await reviewSlicedGcode(
+        { filePath: uploadPath, volume, expectedPrinterModel: 'Snapmaker U1' },
+        expoGcodeIo,
+      );
+      setSliceReview(review);
+      if (!review.ok) {
+        const blocking = review.findings.find((finding) => finding.severity === 'blocking');
+        throw new Error(blocking?.message ?? 'This G-code did not pass review.');
       }
-      setPrintStart({ state: 'starting', message: 'Starting print…' });
-      await api.startPrint(activeUrl, verifiedPath);
+      setSendProgress(0.25);
+
+      const requestedName = buildPrinterUploadFilename(sourceName, gcodePath);
+      // Same stat the review used, so "the file changed since it was reviewed"
+      // is judged against the same reading rather than a second opinion.
+      const io = createUploadIo(activeUrl, expoGcodeIo.statFile);
+
+      let outcome = await uploadSlicedGcode({ review, filename: requestedName }, io);
+      if (outcome.status === 'needs-approval') {
+        // Never overwrite without asking — the safety rules make this a
+        // question, and the operator is the only one who can answer it.
+        const replace = await new Promise<boolean>((resolve) => {
+          Alert.alert('Replace the file on the printer?', outcome.status === 'needs-approval' ? outcome.message : '', [
+            { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+            { text: 'Replace', style: 'destructive', onPress: () => resolve(true) },
+          ]);
+        });
+        if (!replace) {
+          setSendProgress(0);
+          setPrintStart({ state: 'idle' });
+          return;
+        }
+        outcome = await uploadSlicedGcode(
+          { review, filename: requestedName, overwriteApproved: true },
+          io,
+        );
+      }
+      if (outcome.status !== 'uploaded') {
+        throw new Error(outcome.status === 'refused' ? outcome.message : 'The upload did not complete.');
+      }
+      setSendProgress(0.8);
+
+      // What the printer says it now holds, so the start can confirm the file
+      // has not been replaced in the meantime.
+      const listed = await api.listFiles(activeUrl);
+      const stored = listed.find((file) => file.path === outcome.record.filename);
+      const uploadedFile: UploadedFileFingerprint = {
+        filename: outcome.record.filename,
+        sizeBytes: stored?.size ?? outcome.record.sizeBytes,
+        modified: typeof stored?.modified === 'number' ? stored.modified : null,
+      };
+
+      // The mapping the approval binds to is the one that governs these bytes:
+      // each file tool against the physical toolhead it was routed to.
+      const mappingSources = fileTools.map((fileTool) => {
+        const project = projectFilaments.find((filament) => filament.sourceIndex === fileTool);
+        return {
+          sourceIndex: fileTool,
+          material: project?.material ?? '',
+          color: project?.color ?? '',
+        };
+      });
+      const job = buildStartJob({
+        id: newJobId(),
+        modelId: sourceName ?? fileBaseName(gcodePath),
+        printerId: settings.activePrinterId,
+        gcodeArtifactId: uploadPath,
+        gcodeSha256: review.sha256,
+        uploadedFilename: uploadedFile.filename,
+        filamentMapping: buildFilamentMapping(mappingSources, fullTarget, loadedSlots, Date.now()),
+        at: Date.now(),
+      });
+      await getPrintJobRepository().save(job).catch(() => {});
+
       setSendProgress(1);
-      setPrintStart({ state: 'done', message: `Print started: ${verifiedPath}` });
+      setPrintStart({ state: 'idle' });
       setPreprocessOpen(false);
-      setPrintSentNotice({ filename: verifiedPath });
+      setApproval({
+        state: 'awaiting',
+        job,
+        review,
+        filename: uploadedFile.filename,
+        uploaded: uploadedFile,
+        prefs: requestedPrefs,
+      });
+    } catch (error) {
+      setSendProgress(0);
+      setPrintStart({
+        state: 'error',
+        message: `Upload failed: ${error instanceof Error ? error.message : String(error)}`,
+      });
+    }
+  }, [
+    activeUrl,
+    slice,
+    toolLoad,
+    download,
+    toolRemap,
+    filamentSlots,
+    loadedSlots,
+    projectFilaments,
+    settings.activePrinterId,
+  ]);
+
+  /**
+   * The one path in this screen that can move the printer.
+   *
+   * Everything the operator agreed to is turned into an approval record here and
+   * immediately handed to `startApprovedPrint`, which re-reads printer state,
+   * the file and the loaded filament before issuing anything. Refusals report
+   * every failing check rather than the first.
+   */
+  const confirmStart = useCallback(async (result: StartApprovalResult) => {
+    if (approval.state !== 'awaiting' || !activeUrl) return;
+    const { job, uploaded, review, prefs } = approval;
+    setPrintStart({ state: 'starting', message: 'Checking the printer…' });
+
+    try {
+      const at = Date.now();
+      const approved = grantStartApproval(
+        job,
+        createStartApproval({
+          job,
+          printerId: settings.activePrinterId,
+          filename: uploaded.filename,
+          gcodeSha256: review.sha256,
+          approvedAt: at,
+        }),
+        at,
+      );
+      await getPrintJobRepository().save(approved).catch(() => {});
+
+      const outcome = await startApprovedPrint(
+        {
+          job: approved,
+          activePrinterId: settings.activePrinterId,
+          uploaded,
+          cameraFrame: result.cameraFrame,
+          operatorConfirmedBedClear: result.bedClear,
+          now: Date.now(),
+        },
+        createStartIo(activeUrl, { headSources: ace.headSources, prefs }),
+      );
+      await getPrintJobRepository().save(outcome.job).catch(() => {});
+
+      if (outcome.status !== 'started') {
+        const detail = outcome.failures.map((failure) => failure.message).join(' ');
+        setPrintStart({ state: 'error', message: `${outcome.message} ${detail}`.trim() });
+        // An uncertain outcome is not a refusal the operator can retry past:
+        // the job is finished either way, so the approval screen closes.
+        if (outcome.uncertain) setApproval({ state: 'idle' });
+        return;
+      }
+
+      setPrintStart({ state: 'done', message: `Print started: ${outcome.filename}` });
+      setApproval({ state: 'idle' });
+      setPrintSentNotice({ filename: outcome.filename });
       // Push a concrete Home route after staging the one-shot notice. Unlike a
       // tab-level navigate to an already-mounted route, this cannot be ignored
       // as a no-op by the nested navigator.
       router.push('/');
     } catch (error) {
-      setSendProgress(0);
       setPrintStart({
         state: 'error',
-        message: `Send failed: ${error instanceof Error ? error.message : String(error)}`,
+        message: error instanceof Error ? error.message : String(error),
       });
     }
-  }, [activeUrl, slice, toolLoad, download, router, toolRemap, filamentSlots]);
+  }, [approval, activeUrl, settings.activePrinterId, ace.headSources, router]);
+
+  const cancelApproval = useCallback(() => {
+    // The file stays on the printer; only the approval is withdrawn. Nothing
+    // has moved, so there is nothing to stop.
+    setApproval({ state: 'idle' });
+    setPrintStart({ state: 'idle' });
+    setSendProgress(0);
+  }, []);
 
   const refresh = async () => {
     setRefreshing(true);
@@ -1114,6 +1281,14 @@ export default function SliceLabScreen() {
 
   const ready = result.state === 'ready' ? result.status.loaded && !result.status.coreError : false;
   const printerReady = connection === 'connected' && Boolean(activeUrl);
+  // Phase 7's review stops being advisory here: a blocking finding — a toolpath
+  // off the bed, an empty file, a hash that could not be taken — now closes the
+  // door to the printer rather than being shown next to an enabled button.
+  const reviewBlocked = sliceReview !== null && !sliceReview.ok;
+  const cameraSnapshotUrl = useMemo(
+    () => resolveSnapshotUrl(undefined, settings.cameraUrl, activeUrl),
+    [settings.cameraUrl, activeUrl],
+  );
   const hasModel = download.state === 'success';
   const sliced = slice.state === 'success';
   const slicedInitialTool = slice.state === 'success'
@@ -1371,14 +1546,18 @@ export default function SliceLabScreen() {
             {slice.result.estimatedFilamentGrams.toFixed(1)} g
           </Text>
           <TouchableOpacity
-            style={[styles.button, !printerReady && styles.buttonOff]}
-            disabled={!printerReady}
+            style={[styles.button, (!printerReady || reviewBlocked) && styles.buttonOff]}
+            disabled={!printerReady || reviewBlocked}
             onPress={openPreprocess}
             activeOpacity={0.85}
           >
             <MaterialCommunityIcons name="printer-3d" size={18} color={colors.text} />
             <Text style={styles.buttonText}>
-              {printerReady ? 'Upload & Print' : 'Printer offline'}
+              {reviewBlocked
+                ? 'G-code did not pass review'
+                : printerReady
+                  ? 'Upload to printer'
+                  : 'Printer offline'}
             </Text>
           </TouchableOpacity>
           <TouchableOpacity
@@ -1452,8 +1631,25 @@ export default function SliceLabScreen() {
       progress={sendProgress}
       statusMessage={printStart.state === 'starting' ? printStart.message : null}
       errorMessage={printStart.state === 'error' ? printStart.message : null}
-      onSend={uploadAndPrint}
+      onSend={uploadForApproval}
+      sendLabel="Upload"
     />
+
+    {approval.state === 'awaiting' ? (
+      <StartApprovalDialog
+        visible
+        job={approval.job}
+        review={approval.review}
+        filename={approval.filename}
+        cameraSnapshotUrl={cameraSnapshotUrl}
+        cameraEndpoint={settings.cameraUrl}
+        starting={printStart.state === 'starting'}
+        statusMessage={printStart.state === 'starting' ? printStart.message : null}
+        errorMessage={printStart.state === 'error' ? printStart.message : null}
+        onCancel={cancelApproval}
+        onStart={confirmStart}
+      />
+    ) : null}
     </>
   );
 }

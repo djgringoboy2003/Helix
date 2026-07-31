@@ -3,7 +3,7 @@
 Where the project actually stands, for picking up work without re-deriving it.
 Update this whenever a phase closes.
 
-**Last updated:** 2026-07-31, after Phase 6.
+**Last updated:** 2026-07-31, after Phase 9 and the cutover.
 
 ## Orientation
 
@@ -29,10 +29,11 @@ existing behaviour behind safety gates, not building new — see
 | 4 — unified imports | `683e32f` | `services/import/{ImportCoordinator,ImportTypes,ImportLibrary,ThreeMfInspector,ExpoImportIo}.ts`. `docs/PHASE_4_IMPORTS.md`. |
 | 5 — U1 preparation | `02e60a6` | `services/prepare/`, `U1ProjectRewriter.kt`, `PreparationReportCard.tsx`. `docs/PHASE_5_U1_PREPARATION.md`. |
 | 6 — filament mapping | `7bce4f8` | `services/filament/`, `FilamentMappingCard.tsx`. `docs/PHASE_6_FILAMENT_MAPPING.md`. |
-| 7 — slicing and review | pending commit | `services/gcode/`, `SliceReviewCard.tsx`. `docs/PHASE_7_SLICE_REVIEW.md`. |
-| 8 — upload-only | pending commit | `services/upload/UploadService.ts`. `docs/PHASE_8_UPLOAD_ONLY.md`. **Additive only — the cutover is Phase 9.** |
+| 7 — slicing and review | `00821a8` | `services/gcode/`, `SliceReviewCard.tsx`. `docs/PHASE_7_SLICE_REVIEW.md`. |
+| 8 — upload-only | `00821a8` | `services/upload/UploadService.ts`. `docs/PHASE_8_UPLOAD_ONLY.md`. Additive only. |
+| 9 — safe start **and the cutover** | pending commit | `services/start/`, `services/printer/`, `StartApprovalDialog.tsx`, `useReprintApproval.ts`. `docs/PHASE_9_SAFE_START.md`. |
 
-Backlog phases 0–8 are complete. Phase 1 (branding, icons, app identity) was
+Backlog phases 0–9 are complete. Phase 1 (branding, icons, app identity) was
 **not** done — the app is still `Helix` / `org.crabcore.u1control` / 1.2.8.
 
 ## On-device verification, 2026-07-31
@@ -55,9 +56,11 @@ Not covered by that run, and still unverified on device:
 
 - The import **rejection** paths. No corrupt, traversal-carrying or
   geometry-free file was tried; those are covered by the suite only.
-- Whether the mapping *affects* slicing — by design it does not yet. Slicing
-  still uses the tab's existing `toolRemap` path, so a correct slice does not
-  currently depend on the mapping being right. That wiring is Phases 8–9.
+- Whether the mapping *affects* slicing — by design it still does not. Slicing
+  uses the tab's existing `toolRemap` path. Phase 9 made the job's mapping
+  describe that decision, bound the approval to it, and derived
+  `SET_PRINT_USED_EXTRUDERS` from it, so the mapping now governs what the
+  printer is told even though it does not govern the slice.
 
 **Capturing a device run:** this phone's logcat ring buffer defaults to 256 KiB,
 which holds roughly four minutes and had already rotated past the session. Run
@@ -88,37 +91,46 @@ approved-start path.
 
 ## Next
 
-**Phase 9, safe start — and the cutover, in one move.** This is the change the
-whole backlog has been building towards, and the one flagged since Stage A as
-the highest-blast-radius edit in the project.
+**Phase 10, monitoring.** Live progress, ETA, layer count, temperature cards,
+active toolhead, pause/resume/cancel, filament runout, notifications and print
+history — most of which already ships in some form on the Home tab and needs
+auditing against the backlog rather than building from nothing.
 
-It has to be one change because the halves cannot ship apart: removing
-`startPrint` from the three call sites without the approved-start path would
-leave the app able to upload and unable to print. Phase 8 therefore left them
-alone deliberately — see `docs/PHASE_8_UPLOAD_ONLY.md`.
+Phase 9 leaves the pipeline complete from browse to print. What it does not
+leave is a monitored print: once `startApprovedPrint` returns, the job record
+sits at `printing` and nothing updates it again.
 
-The move is: re-route `app/(tabs)/slicer.tsx`, `app/(tabs)/index.tsx` and
-`app/(tabs)/files.tsx` onto `PrintJobMachine` + `ApprovalService` +
-`uploadSlicedGcode` + a new start path, together, with the fresh-camera check,
-the bed-clear prompt and hold-to-start in place, and Phase 7's review promoted
-from displayed to enforced.
+## The cutover is done
 
-## The highest-risk item in the backlog
+The three call sites that ran slice → upload → start from one tap are re-routed,
+and a **fourth** start path that the previous notes did not know about — native
+OkHttp in `HelixGcodePreviewActivity.kt` — has had its start call deleted, along
+with the preference and extruder helpers that only it used.
 
-Three call sites run slice → upload → start as one continuous flow, triggered by
-one confirmation tap:
+Nothing in the app can now start a print except `startApprovedPrint`, and it
+refuses without a validated `StartApproval`, a fresh bed image, a re-read of
+printer state and filament, and a two-second operator hold. See
+`docs/PHASE_9_SAFE_START.md` — particularly the section on why the G-code hash
+is the one bound value that cannot be re-derived at start time, and what is
+checked instead.
 
-- `app/(tabs)/slicer.tsx:892`
-- `app/(tabs)/index.tsx:450`
-- `app/(tabs)/files.tsx:278`
+Phase 7's review is enforced from this change: a blocking finding disables the
+upload button, `uploadSlicedGcode` refuses it independently, and the review is
+re-run on the bytes actually being uploaded rather than reused from the card
+(a re-slice or a timelapse injection produces a different file).
 
-They have no camera-freshness check, no approval binding, and no hold-to-start —
-none of the guarantees `CLAUDE.md` requires. This is **shipped,
-user-relied-upon behaviour**, not a stub.
+**Verified on device**, `53b451df` against a real U1 on 2026-07-31: the native
+preview uploaded without starting, the file sat idle for 45 seconds, and the
+print then started only after the operator saw a live bed image and held the
+button. `applyPrintSetup` fired 0.4 s before the start with `EXTRUDERS=1`
+derived from the toolpaths. The installed APK was taken apart to confirm the
+trace could not have come from the old native code:
+`printer/print/start` appears **zero** times across all four dex files and once
+in the JS bundle. Full evidence in `docs/PHASE_9_SAFE_START.md`.
 
-`PrintJobMachine` and `ApprovalService` already provide the gated path they must
-route through, but re-routing them is its own reviewed change (Phases 8–9).
-**Flag it explicitly before touching it; never refactor it in passing.**
+Still unexercised on device: the Slice tab's own `uploadForApproval` path,
+Home's reprint of a large file, and every refusal path — nothing was
+deliberately broken on the real printer.
 
 ## Known gaps and deferred work
 
@@ -128,9 +140,28 @@ route through, but re-routing them is its own reviewed change (Phases 8–9).
   technique behind `ModelSourceProvider` — but the Slice tab has not moved onto
   the provider yet. Doing that is what retires one path, and it means editing a
   shipped flow. Both now feed the same import, so neither is unscanned.
-- **No job record at import.** Phase 4 produces an `ImportRecord` carrying the
-  SHA-256 a job will bind to, but creating the `PrintJob` so that identity
-  survives into the approval belongs with Phases 8–9.
+- **No job record at import — deliberately still open.** Phase 4 produces an
+  `ImportRecord` carrying a SHA-256, but Phase 9 creates the `PrintJob` at
+  `review_required`, not at import. The reprint paths genuinely have no source
+  or prepared artifact, and fabricating hashes to satisfy the earlier guards
+  would be the confident wrong answer the safety rules exist to prevent.
+- **A started print is not monitored.** `startApprovedPrint` leaves the job at
+  `printing` and nothing advances it to `completed`, `paused` or `failed`
+  afterwards. That is Phase 10.
+- **The filament mapping still does not drive slicing.** The Slice tab's
+  `toolRemap` decides tools; the job's mapping *describes* that decision, binds
+  the approval to it, and is what `SET_PRINT_USED_EXTRUDERS` is derived from.
+  Replacing `toolRemap` outright is a refactor of shipped slicing behaviour.
+- **A remapped reprint transfers the file three times** — download, remap,
+  upload, download again to hash what landed. Accepted: reading back what
+  actually landed is what verifies the upload end to end.
+- **The reprint progress bar only tracks the download.** After it reaches 100%
+  the extent scan and the JS SHA-256 still have to run, with no indication. On a
+  28 MB file the download alone is ~14 s on wifi, so the silent stretch after it
+  is likely to be the part that feels broken. Measure before redesigning.
+- **No native file hasher.** `setFileHasher` has existed since Stage B and still
+  has no caller, so every hash is JavaScript at roughly a second per 10 MB.
+  `HelixSlicerModule` already does native file I/O and could supply one.
 - **No library screen.** `ImportLibrary.list()` exists and is persisted, but the
   "existing library item" entry point has no UI.
 - **No thumbnail extraction in JS, deliberately.** The native module already
@@ -203,3 +234,20 @@ route through, but re-routing them is its own reviewed change (Phases 8–9).
 - **The test framework stays the hand-rolled runner.** Adopting Jest was
   considered and rejected in Stage B: new dependency, new config, second CI
   command, for tests that do not need it.
+- **Nothing is trusted from the approval screen.** Printer state, the file
+  listing and the loaded filament are all re-read inside `startApprovedPrint`,
+  immediately before the command. An approval is a claim about a moment.
+- **The job enters `starting` between the two printer commands.** The toolhead
+  map configures rather than moves, so a printer that refuses it leaves the job
+  `start_approved` and retryable; only the start command justifies `starting`.
+- **A failed start command is uncertain, not failed.** The request may have
+  landed with the response lost, so `StartOutcome.uncertain` is true, the job is
+  terminal, and no retry is offered.
+- **`toolsUsed` comes from the toolpaths, never the header.** A four-filament
+  project sliced to one colour still declares four filaments; building the
+  extruder map from that would arm the wrong heads.
+- **A reprint is a start.** There is no "we printed this before" exemption: the
+  file is read back and hashed, because that is the only honest way to have a
+  SHA-256 for bytes this app did not produce.
+- **The hold is two seconds on purpose.** A tap is something a thumb does by
+  accident; that is also why there is no second "are you sure".

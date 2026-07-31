@@ -22,6 +22,16 @@ export interface PrintExtents {
   maxZ: number;
   /** Extruding moves seen. Zero means the file deposits nothing. */
   extrudingMoves: number;
+  /**
+   * Toolheads that actually deposit material, ascending.
+   *
+   * Derived from tool changes rather than from the header's filament list,
+   * because a four-filament project sliced down to one colour still declares
+   * four filaments. This is what `SET_PRINT_USED_EXTRUDERS` has to be built
+   * from: a tool the file never extrudes with is not a tool the print needs
+   * loaded.
+   */
+  toolsUsed: number[];
 }
 
 interface ScannerState {
@@ -33,6 +43,8 @@ interface ScannerState {
   absoluteExtrusion: boolean;
   extents: PrintExtents | null;
   extrudingMoves: number;
+  tool: number;
+  extrudingTools: Set<number>;
 }
 
 export interface GcodeScanner {
@@ -74,6 +86,8 @@ export function createGcodeScanner(): GcodeScanner {
     absoluteExtrusion: true,
     extents: null,
     extrudingMoves: 0,
+    tool: 0,
+    extrudingTools: new Set<number>(),
   };
   let carry = '';
 
@@ -87,6 +101,7 @@ export function createGcodeScanner(): GcodeScanner {
         minZ: state.z,
         maxZ: state.z,
         extrudingMoves: 0,
+        toolsUsed: [],
       };
       return;
     }
@@ -118,6 +133,13 @@ export function createGcodeScanner(): GcodeScanner {
     }
     if (line.startsWith('M83')) {
       state.absoluteExtrusion = false;
+      return;
+    }
+    // A bare `T<n>` is a tool change. Matched exactly so `M104 T0` and
+    // `TIMELAPSE_TAKE_FRAME` cannot be mistaken for one.
+    const toolChange = /^T(\d+)$/.exec(line);
+    if (toolChange) {
+      state.tool = Number(toolChange[1]);
       return;
     }
     if (line.startsWith('G92')) {
@@ -161,6 +183,7 @@ export function createGcodeScanner(): GcodeScanner {
 
     if (extruded > 0) {
       state.extrudingMoves += 1;
+      state.extrudingTools.add(state.tool);
       // Both ends of the extrusion count: the material spans the whole segment,
       // so recording only the destination would under-report the printed area.
       const to = { x: state.x, y: state.y, z: state.z };
@@ -189,7 +212,11 @@ export function createGcodeScanner(): GcodeScanner {
         carry = '';
       }
       if (!state.extents) return null;
-      return { ...state.extents, extrudingMoves: state.extrudingMoves };
+      return {
+        ...state.extents,
+        extrudingMoves: state.extrudingMoves,
+        toolsUsed: [...state.extrudingTools].sort((a, b) => a - b),
+      };
     },
   };
 }
