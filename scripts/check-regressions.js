@@ -273,6 +273,16 @@ test('settings migration starts first launch without a prefilled printer', () =>
   assert.deepEqual(migrated.printers, []);
 });
 
+test('the privacy screen defaults to off and survives a round trip', () => {
+  // Off by default on purpose: FLAG_SECURE also blocks screenshots, and an
+  // operator photographing their own print is the more common need than hiding
+  // a printer name from a shoulder-surfer.
+  assert.equal(migrateSettings({}).privacyScreen, false);
+  assert.equal(migrateSettings({ privacyScreen: true }).privacyScreen, true);
+  // A corrupt stored value falls back to the safe default rather than throwing.
+  assert.equal(migrateSettings({ privacyScreen: 'yes' }).privacyScreen, false);
+});
+
 test('settings migration normalizes legacy single-printer settings', () => {
   const migrated = migrateSettings({
     primaryUrl: '192.168.1.50',

@@ -62,6 +62,15 @@ export interface Settings {
   notifyTempWarning: boolean;
   aceUnits: number;
   accentColor: string;
+  /**
+   * Hides the app from the recents thumbnail and blocks screenshots.
+   *
+   * One toggle for both because Android has no way to separate them: the recents
+   * preview is only suppressed by `FLAG_SECURE`, which also blocks screen
+   * capture. Off by default — an operator photographing their own print is the
+   * more common need than hiding a printer name from a shoulder-surfer.
+   */
+  privacyScreen: boolean;
   language: string;
   temperatureUnit: TemperatureUnit;
   /** Hex colours for the four physical filament slots (T0–T3), used by paint/preview. */
@@ -117,6 +126,7 @@ export const DEFAULT_SETTINGS: Settings = {
   notifyTempWarning: true,
   aceUnits: 1,
   accentColor: '#2196f3',
+  privacyScreen: false,
   language: 'en',
   temperatureUnit: 'c',
   filamentSlotColors: [...DEFAULT_FILAMENT_SLOT_COLORS],
@@ -267,6 +277,7 @@ export function migrateSettings(raw: Partial<Settings>): Settings {
     notifyTempWarning: booleanValue(parsed.notifyTempWarning, DEFAULT_SETTINGS.notifyTempWarning),
     aceUnits: numberValue(parsed.aceUnits, DEFAULT_SETTINGS.aceUnits),
     accentColor: stringValue(parsed.accentColor) || DEFAULT_SETTINGS.accentColor,
+    privacyScreen: booleanValue(parsed.privacyScreen, DEFAULT_SETTINGS.privacyScreen),
     language: stringValue(parsed.language) || DEFAULT_SETTINGS.language,
     temperatureUnit: normalizeTemperatureUnit(parsed.temperatureUnit),
     filamentSlotColors: normalizeFilamentSlotColors(parsed.filamentSlotColors),

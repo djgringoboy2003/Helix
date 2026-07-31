@@ -27,6 +27,7 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.asRequestBody
 import org.json.JSONObject
+import android.view.WindowManager
 import java.io.File
 import java.io.RandomAccessFile
 import java.security.MessageDigest
@@ -68,6 +69,45 @@ class HelixSlicerModule(
     }
 
     promise.resolve(status)
+  }
+
+  /**
+   * Hides the app from the recents thumbnail and blocks screen capture.
+   *
+   * Android offers only `FLAG_SECURE`, which does both at once — there is no
+   * way to blank the recents preview while still allowing an operator to
+   * screenshot their own print. That trade-off belongs to the operator, so this
+   * is driven by a setting rather than imposed, and defaults to off.
+   *
+   * The value is mirrored into SharedPreferences because the flag has to be set
+   * before the window is first drawn: on a cold start `MainActivity.onCreate`
+   * reads it, long before JavaScript is running to call this.
+   */
+  @ReactMethod
+  fun setPrivacyScreen(enabled: Boolean, promise: Promise) {
+    reactApplicationContext
+      .getSharedPreferences(PRIVACY_PREFS, android.content.Context.MODE_PRIVATE)
+      .edit()
+      .putBoolean(PRIVACY_KEY, enabled)
+      .apply()
+
+    val activity = getCurrentActivity()
+    if (activity == null) {
+      // Stored anyway; the next onCreate applies it.
+      promise.resolve(false)
+      return
+    }
+    activity.runOnUiThread {
+      if (enabled) {
+        activity.window.setFlags(
+          WindowManager.LayoutParams.FLAG_SECURE,
+          WindowManager.LayoutParams.FLAG_SECURE,
+        )
+      } else {
+        activity.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+      }
+    }
+    promise.resolve(true)
   }
 
   /**
@@ -1384,6 +1424,8 @@ class HelixSlicerModule(
   }
 
   companion object {
+    const val PRIVACY_PREFS = "helix_privacy"
+    const val PRIVACY_KEY = "privacy_screen"
     const val NAME = "HelixSlicer"
     const val EXTRA_PRINT_SENT_FILENAME = "helix_print_sent_filename"
     private const val EXTRA_MODEL_CONSUMED = "helix_model_consumed"

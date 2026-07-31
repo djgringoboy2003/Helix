@@ -14,7 +14,11 @@ import {
   subscribeToFcmAnnouncements,
 } from '../services/notifications';
 import { printerConnectionUrl } from '../services/moonraker';
-import { getSharedMakerWorldLink, getSharedModelFile } from '../services/nativeSlicer';
+import {
+  getSharedMakerWorldLink,
+  getSharedModelFile,
+  setPrivacyScreen,
+} from '../services/nativeSlicer';
 import { setPendingModel } from '../services/pendingModel';
 import { installNativeFileHasher } from '../services/security/NativeFileHasher';
 import { colors } from '../constants/theme';
@@ -55,6 +59,14 @@ function AppShell() {
   const activePrinter = settings.printers.find((printer) => printer.id === settings.activePrinterId);
   const activePrinterId = activePrinter?.id ?? '';
   const activePrinterUrl = activePrinter ? printerConnectionUrl(activePrinter) : '';
+
+  // Keeps the window flag in step with the setting. The native side also
+  // stores it, so a cold start applies it before the first frame is drawn —
+  // otherwise one recents thumbnail would be captured before JavaScript ran.
+  useEffect(() => {
+    if (!loaded) return;
+    setPrivacyScreen(settings.privacyScreen).catch(() => {});
+  }, [loaded, settings.privacyScreen]);
 
   useEffect(() => {
     if (!loaded || settings.notificationMode !== 'fcm') return;

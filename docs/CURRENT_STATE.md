@@ -35,7 +35,7 @@ existing behaviour behind safety gates, not building new — see
 | gitignore repair | `5bbb3d1` | `services/gcode/` had never been committed; `main` could not build from a clean clone. |
 | 10 — monitoring | `018cef6` | `services/jobs/JobMonitor.ts`, `hooks/useJobMonitor.ts`. `docs/PHASE_10_MONITORING.md`. |
 | CI repair | `25edaf1` | `Build APK` skips instead of failing without signing secrets, so a red run means something. |
-| 11 — release quality (part) | pending commit | Licence screen, diagnostic export. `docs/PHASE_11_RELEASE_QUALITY.md`. |
+| 11 — release quality (part) | `66968a5` + pending | Licence screen, diagnostic export, privacy screen. `docs/PHASE_11_RELEASE_QUALITY.md`. |
 
 Backlog phases 0–10 are complete, and Phase 11 in part — see
 `docs/PHASE_11_RELEASE_QUALITY.md` for the audit of what already shipped and
@@ -99,7 +99,7 @@ approved-start path.
 
 **What is left of Phase 11, then Phase 12.** The remaining Phase 11 items are
 each a piece of work in their own right rather than a tidy-up: a light theme, a
-real tablet layout, an opt-in privacy screen, and a full accessibility sweep.
+real tablet layout, and a full accessibility sweep.
 None is blocking. Phase 12 (native MakerWorld search) is explicitly gated on the
 MVP working and is optional by design — the WebView path stays.
 
@@ -180,9 +180,8 @@ deliberately broken on the real printer.
 - **Dark theme only.** `constants/theme.ts` is a fixed dark palette threaded
   through every screen and the native activities; nothing reads
   `useColorScheme`. A light theme is a design decision and a wide refactor.
-- **No privacy screen.** Android cannot blank only the recents thumbnail — that
-  needs `FLAG_SECURE`, which also blocks the screenshots an operator wants of
-  their own print. Belongs behind a setting.
+- **A complete accessibility sweep.** The safety-critical path is labelled;
+  auditing every remaining control is worth a pass of its own.
 - `extractMakerWorldDesignId` in `services/makerWorld.ts` matches anywhere in a
   string, so `https://evil.example/makerworld.com/models/1` satisfies it.
   `MakerWorldUrlParser` is the host-anchored replacement; the old helper goes

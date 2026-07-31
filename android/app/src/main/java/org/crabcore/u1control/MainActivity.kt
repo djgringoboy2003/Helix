@@ -2,7 +2,11 @@ package org.crabcore.u1control
 
 import android.os.Build
 import android.os.Bundle
+import android.content.Context
 import android.content.Intent
+import android.view.WindowManager
+
+import org.crabcore.u1control.slicing.HelixSlicerModule
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
@@ -17,7 +21,22 @@ class MainActivity : ReactActivity() {
     // coloring the background, status bar, and navigation bar.
     // This is required for expo-splash-screen.
     setTheme(R.style.AppTheme);
+    // Before the first frame. FLAG_SECURE applied later would still leave one
+    // recents thumbnail captured from before JavaScript started, which defeats
+    // the point of the setting on a cold start.
+    applyPrivacyScreen()
     super.onCreate(null)
+  }
+
+  private fun applyPrivacyScreen() {
+    val enabled = getSharedPreferences(HelixSlicerModule.PRIVACY_PREFS, Context.MODE_PRIVATE)
+      .getBoolean(HelixSlicerModule.PRIVACY_KEY, false)
+    if (enabled) {
+      window.setFlags(
+        WindowManager.LayoutParams.FLAG_SECURE,
+        WindowManager.LayoutParams.FLAG_SECURE,
+      )
+    }
   }
 
   override fun onNewIntent(intent: Intent) {

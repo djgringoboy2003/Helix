@@ -155,6 +155,7 @@ type HelixSlicerModule = {
   prepareTimelapseGcode: (path: string) => Promise<string>;
   uploadGcode: (baseUrl: string, filename: string, path: string) => Promise<NativeGcodeUpload>;
   hashFileSha256: (path: string) => Promise<string>;
+  setPrivacyScreen: (enabled: boolean) => Promise<boolean>;
 };
 
 export type MakerWorldCookieDebug = {
@@ -605,6 +606,21 @@ export async function nativeHashFile(path: string): Promise<string | null> {
     return await nativeModule.hashFileSha256(path.replace(/^file:\/\//, ''));
   } catch {
     return null;
+  }
+}
+
+/**
+ * Hides the app from recents and blocks screenshots, or stops doing so.
+ *
+ * Resolves false where there is no native module or no foreground activity —
+ * the value is still stored and applied on the next cold start.
+ */
+export async function setPrivacyScreen(enabled: boolean): Promise<boolean> {
+  if (Platform.OS !== 'android' || !nativeModule?.setPrivacyScreen) return false;
+  try {
+    return await nativeModule.setPrivacyScreen(enabled);
+  } catch {
+    return false;
   }
 }
 

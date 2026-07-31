@@ -470,6 +470,18 @@ export default function SettingsScreen() {
         <MacroDisplayCard />
 
         <View style={styles.card}>
+          <Text style={styles.cardTitle}>{t('Privacy')}</Text>
+          <Toggle
+            label={t('Hide from recent apps')}
+            value={draft.privacyScreen}
+            onChange={(v) => set({ privacyScreen: v })}
+          />
+          <Text style={styles.note}>
+            {t('Also blocks screenshots — Android cannot separate the two.')}
+          </Text>
+        </View>
+
+        <View style={styles.card}>
           <Text style={styles.cardTitle}>{t('Theme')}</Text>
           <Text style={styles.fieldLabel}>{t('Accent color')}</Text>
           <View style={styles.swatchRow}>

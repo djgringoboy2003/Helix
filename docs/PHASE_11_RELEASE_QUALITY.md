@@ -11,7 +11,7 @@ genuinely missing, on top of Phase 10 (`018cef6`).
 | Large text | **Ships.** Nothing sets `allowFontScaling={false}`, so system text scaling already applies |
 | Dark and light appearance | **Dark only.** `constants/theme.ts` is a fixed dark palette and nothing reads `useColorScheme` |
 | Tablet layout | **Partial** — `useWindowDimensions` drives the printer picker; no dedicated wide layout |
-| Privacy screen | **Missing** |
+| Privacy screen | **Added here**, behind a setting |
 | Licence screen | **Added here** |
 | Diagnostic export | **Added here** |
 | Crash-safe state | **Ships** — `PrintJobRepository` recovery, `LastSliceStore`, settings migration |
@@ -91,12 +91,28 @@ than half-redacted.
 The start approval is *described*, never reproduced — its revision and remaining
 lifetime, not the record, which carries a filename and a printer id.
 
+## The privacy screen
+
+Android offers only `FLAG_SECURE`, which hides the app from the recents
+thumbnail **and** blocks all screen capture. There is no way to have one without
+the other, and blocking screenshots would stop an operator photographing their
+own print — which is the more common need than hiding a printer name from
+somebody looking over a shoulder.
+
+So it is a setting, defaulted **off**, rather than a decision imposed here.
+
+The value is mirrored into SharedPreferences by the native module, because
+`MainActivity.onCreate` has to apply the flag *before the first frame is drawn*.
+Applying it only once JavaScript is running would leave one recents thumbnail
+already captured from the cold start, which defeats the point of the setting for
+exactly the person who turned it on.
+
 ## Verification
 
 | Check | Result |
 |---|---|
 | `npm run typecheck` | **Pass** |
-| `npm run test:regressions` | **Pass**, 517 assertions (495 before, 22 new) |
+| `npm run test:regressions` | **Pass**, 518 assertions (495 before, 23 new) |
 | `npx eslint` on changed paths | **Pass**, 0 errors |
 | `npx expo export --platform android` | **Pass** |
 | `cd android && ./gradlew assembleRelease` | **Pass** |
@@ -109,11 +125,23 @@ lifetime, not the record, which carries a filename and a printer id.
   badly is worse than not doing it.
 - **A tablet layout**, for the same reason: the screens reflow, but a real
   wide-screen design is its own piece of work.
-- **A privacy screen.** Android has no way to blank only the recents thumbnail —
-  it needs `FLAG_SECURE`, which also blocks all screenshots, including the ones
-  an operator wants of their own print. That trade-off is the user's to make, so
-  it belongs behind a setting rather than being imposed here.
 - **A complete accessibility sweep.** The safety-critical path is labelled;
   auditing every remaining control is worth a pass of its own.
-- **Nothing was pushed or published.** The `release` job stays gated on signing
-  secrets the fork does not have.
+## Pushed, and CI is green
+
+`main` was pushed to the fork at `66968a5`. Both workflows passed — the first
+time `Build APK` has succeeded there, since it previously hard-failed on the
+missing signing secrets:
+
+```
+✓ validate in 41s
+✓ build     in 57s   (signing skipped, with a notice naming the missing secrets)
+- release   in 0s    (skipped: gated on an APK having been produced)
+```
+
+`Android baseline` also passed, which is the clean-clone confirmation that the
+`services/gcode` repair in `5bbb3d1` actually fixed the build rather than only
+looking fixed on the development machine.
+
+The fork still cannot publish: `release` is gated on `needs.build.outputs.built`,
+so a skipped build can never be followed by a release.
