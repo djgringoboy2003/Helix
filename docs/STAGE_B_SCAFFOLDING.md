@@ -1,5 +1,10 @@
 # Stage B — Architecture Scaffolding
 
+> **Historical record of Stage B.** Two forward-looking statements below are
+> now resolved: `FileHash.setFileHasher()` gained its native caller at
+> `40af7f4`, and the call sites this document says "will be re-routed" were
+> re-routed at `3dd64c4`.
+
 Domain layer for the Snapmaker U1 MakerWorld workflow, added per `CLAUDE.md`
 Stage B and Phase 2 of `docs/IMPLEMENTATION_BACKLOG.md`.
 

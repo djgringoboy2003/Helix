@@ -1,5 +1,10 @@
 # Baseline Audit
 
+> **Historical record of Stage A**, and the document that first flagged the
+> three `startPrint` call sites as the highest-blast-radius change in the
+> backlog. It was right, and it undercounted: a fourth start path existed in
+> Kotlin. All four were closed at `3dd64c4` — see `docs/PHASE_9_SAFE_START.md`.
+
 Stage A audit of the untouched `FatBoy721/Helix` fork, performed before any product behaviour changes, per `CLAUDE.md`.
 
 - Fork: `https://github.com/djgringoboy2003/Helix` (cloned to a local working copy, `origin` remote)

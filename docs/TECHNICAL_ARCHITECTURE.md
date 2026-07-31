@@ -1,5 +1,12 @@
 # Technical Architecture
 
+> **Specification, not status.** Written at Stage A. Nearly all of it now
+> exists, though not always where this file put it — notably `U1PrintService`
+> is `services/start/StartService.ts`, and the Moonraker adapters for upload
+> and start share one file, `services/printer/MoonrakerPrinterIo.ts`. The
+> feature-flag and logging policies are implemented as written. Read
+> `docs/CURRENT_STATE.md` for the real tree.
+
 ## High-level structure
 
 ```text

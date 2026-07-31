@@ -1,5 +1,8 @@
 # Stage C — MakerWorld WebView MVP (Explore tab)
 
+> **Historical record of Stage C.** The Phase 8–9 work it anticipates is done
+> (`00821a8`, `3dd64c4`), and `setFileHasher` now has a caller (`40af7f4`).
+
 Adds the Explore tab required by `CLAUDE.md` Stage C and Phase 3 of
 `docs/IMPLEMENTATION_BACKLOG.md`, on top of the Stage B domain layer
 (`add4de6`).

@@ -1,5 +1,11 @@
 # Phase 7 — Slicing and review
 
+> **Superseded in part by Phase 9.** This document says the review is
+> "displayed, not yet enforced". That stopped being true at `3dd64c4`: a
+> blocking finding now disables the upload, `uploadSlicedGcode` refuses an
+> unreviewed slice independently, and the review is re-run on the bytes actually
+> uploaded rather than reused from the card. See `docs/PHASE_9_SAFE_START.md`.
+
 Implements Phase 7 of `docs/IMPLEMENTATION_BACKLOG.md` on top of Phase 6
 (`7bce4f8`).
 

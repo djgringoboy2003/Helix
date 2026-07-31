@@ -1,5 +1,27 @@
 # Implementation Backlog
 
+> **Status, 2026-07-31.** Phases 0–10 are complete and phase 11 substantially
+> so. This file is the original specification and is kept unedited below as the
+> record of what each phase was asked to deliver; it is **not** a to-do list any
+> more. For what actually exists, what was deliberately skipped and why, and
+> what is worth doing next, read `docs/CURRENT_STATE.md`.
+>
+> | Phase | Status | Commit | Notes |
+> |---|---|---|---|
+> | 0 baseline audit | done | `403208a` | `docs/BASELINE_AUDIT.md` |
+> | 1 branded fork | **not done** | — | Still `Helix` / `org.crabcore.u1control` / 1.2.8. Deliberate: this is a fork, and renaming it is a product decision |
+> | 2 domain scaffolding | done | `add4de6` | `docs/STAGE_B_SCAFFOLDING.md` |
+> | 3 MakerWorld WebView | done | `75d5563` | `docs/STAGE_C_EXPLORE.md`. Live back/forward history still unexercised |
+> | 4 unified imports | done | `683e32f` | `docs/PHASE_4_IMPORTS.md` |
+> | 5 U1 preparation | done | `02e60a6` | `docs/PHASE_5_U1_PREPARATION.md` |
+> | 6 filament mapping | done | `7bce4f8` | `docs/PHASE_6_FILAMENT_MAPPING.md` |
+> | 7 slicing and review | done | `00821a8` | `docs/PHASE_7_SLICE_REVIEW.md` |
+> | 8 upload-only | done | `00821a8` | `docs/PHASE_8_UPLOAD_ONLY.md` |
+> | 9 safe start + cutover | done | `3dd64c4` | `docs/PHASE_9_SAFE_START.md`. Verified on device |
+> | 10 monitoring | done | `018cef6` | `docs/PHASE_10_MONITORING.md`. Most of it already shipped; the job record was the gap |
+> | 11 release quality | part | `66968a5`, `fad986d` | `docs/PHASE_11_RELEASE_QUALITY.md`. Light theme, tablet layout and a full accessibility sweep deliberately left |
+> | 12 native MakerWorld | not started | — | Optional by design; the WebView path stays regardless |
+
 ## Phase 0, repository and licence audit
 
 ### Deliverables

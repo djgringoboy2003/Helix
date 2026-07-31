@@ -6,6 +6,17 @@ over LAN or Tailscale.
 
 <p align="center"><img src="assets/icon.png" width="160" alt="Helix"></p>
 
+> **This is a fork.** Upstream is
+> [FatBoy721/Helix](https://github.com/FatBoy721/Helix). The fork adds a gated
+> MakerWorld-to-U1 workflow: browse, download an editable 3MF, sanitise it,
+> retarget it for the U1, map filaments to toolheads, slice on device, review
+> the actual G-code, upload **without starting**, and start only against a live
+> bed image and a deliberate operator hold.
+>
+> The practical consequence is that **nothing in the app starts a print without
+> an approval** — see [docs/CURRENT_STATE.md](docs/CURRENT_STATE.md) and
+> [docs/PHASE_9_SAFE_START.md](docs/PHASE_9_SAFE_START.md).
+
 ## Install
 
 **Android:** grab the APK from the [latest release](https://github.com/FatBoy721/Helix/releases/latest)
@@ -37,10 +48,17 @@ Scan the QR code with Expo Go, or `npx expo run:android` for a native build.
 - **Macros** — grouped by category so 120 PAXX macros don't hit you as a wall.
   Debounced buttons, ACE macros ask before running.
 - **Console** — live G-code stream + input.
-- **Files** — G-code list with embedded slicer thumbnails, tap to print.
+- **Files** — G-code list with embedded slicer thumbnails. Reprinting reads the
+  file back from the printer, hashes it and checks its toolpaths before asking
+  you to approve the start.
 - **Slice** — on-device STL/3MF slicing for the U1 (Orca profiles, prepare
-  screen, G-code preview), MakerWorld share-to-slice, upload to Moonraker, and
-  start print from the app.
+  screen, G-code preview), MakerWorld share-to-slice, and upload to Moonraker.
+  Uploading never starts a print: the start is a separate step behind a fresh
+  bed-camera image, a filament-mapping confirmation and a hold-to-start.
+- **Licences** — the AGPL text, attribution and third-party notices are bundled
+  in the app, readable offline, with the source offer stated up front.
+- **Diagnostics** — export a report for a bug thread. Addresses, tokens and
+  device paths are stripped automatically.
 - **History** — Fluidd-style printer stats (total jobs, print time, filament)
   plus per-job list with status icons and thumbnails.
 - **Timelapse** — browse, play, and download timelapse videos in-app.
@@ -81,7 +99,15 @@ Scan the QR code with Expo Go, or `npx expo run:android` for a native build.
 ## Development
 
 - `npm run typecheck` — TypeScript check
-- `npx expo export --platform android` — verify the bundle compiles
+- `npm run test:regressions` — the regression suite (hand-rolled runner, not
+  Jest; suites live in `tests/unit/*.test.js` and require the `.ts` sources
+  directly)
+- `npx expo export --platform android` — verify the bundle compiles; catches
+  Metro resolution errors `tsc` cannot, in about a minute
+- `cd android && ./gradlew assembleRelease` — the only build that bundles JS, so
+  it is the one to install when checking a change on a device
+- `node scripts/generate-licence-text.js` — re-run after editing `LICENSE`,
+  `ATTRIBUTION.md` or `THIRD_PARTY_NOTICES.md`; a test fails if you forget
 - Architecture notes live in the source: `hooks/useMoonraker.tsx` is the
   WebSocket JSON-RPC client (auto-reconnect, URL failover, status merge),
   `hooks/useACE.ts` wraps the multiACE object, `services/` holds REST and

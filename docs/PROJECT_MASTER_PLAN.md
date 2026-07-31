@@ -1,5 +1,12 @@
 # Project Master Plan
 
+> **Specification, not status.** Written at Stage A and still accurate as a
+> description of what the product is meant to be. The full user journey in
+> section 94 onwards is now built end to end, and the job state machine in
+> section 437 is implemented in `services/jobs/PrintJobMachine.ts` with the
+> monitor in `JobMonitor.ts` closing it. For what exists today and what was
+> deliberately left, read `docs/CURRENT_STATE.md`.
+
 ## Product goal
 
 Create an Android application that gives Snapmaker U1 owners a phone-first workflow similar to Bambu Handy or the Snapmaker app, while keeping slicing and printer control local.

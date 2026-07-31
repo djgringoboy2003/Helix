@@ -1,5 +1,9 @@
 # Claude Code Master Prompt
 
+> **Historical.** This is the prompt the project was started from, kept for
+> provenance. It describes work that is now done. `CLAUDE.md` is the live
+> instruction file; `docs/CURRENT_STATE.md` is the live status.
+
 You are working inside an Android project for a Snapmaker U1 companion app.
 
 The repository should be a fork of:

@@ -1,5 +1,12 @@
 # Phase 8 — Upload-only
 
+> **The cutover described below as "NOT happened" has since happened**, at
+> `3dd64c4`. All three call sites named here were re-routed, and a fourth that
+> this document did not know about — native OkHttp in
+> `HelixGcodePreviewActivity.kt` — had its start call deleted. Read
+> `docs/PHASE_9_SAFE_START.md` for what actually shipped. The section below is
+> kept as the record of why the two halves could not ship apart.
+
 Implements Phase 8 of `docs/IMPLEMENTATION_BACKLOG.md` on top of Phase 7.
 
 ## What was added

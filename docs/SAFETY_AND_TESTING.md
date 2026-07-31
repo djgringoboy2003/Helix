@@ -1,5 +1,17 @@
 # Safety and Testing Plan
 
+> **Still current, and still the authority.** Every rule here is implemented:
+> the start gate in `services/start/StartService.ts`, camera freshness and
+> approval binding in `services/jobs/ApprovalService.ts`, file integrity in
+> `services/security/`, archive safety in `ThreeMfSecurityScanner.ts`, G-code
+> checks in `services/gcode/`.
+>
+> The gap is in this file's own test layers: the **real U1 checklist** below
+> has only been run on the happy path. Every refusal — stale camera, swapped
+> filament, replaced file, expired approval, busy printer — is covered by the
+> unit suite and has never run on hardware. That is the most valuable
+> outstanding work in the project.
+
 ## Safety boundary
 
 The application controls heaters, motors and a physical build surface.

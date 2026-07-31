@@ -5,6 +5,19 @@ Update this whenever a phase closes.
 
 **Last updated:** 2026-07-31, after Phase 11.
 
+## Read this first if you are picking the project up
+
+1. **The workflow in `CLAUDE.md` is built, end to end**, and verified on a real
+   printer. There is no half-finished phase to resume.
+2. Confirm the tree is green before touching anything: `npm run typecheck` and
+   `npm run test:regressions` (**518 assertions**). `main` is pushed and CI is
+   green.
+3. The single most valuable outstanding work is **not** a backlog phase. It is
+   exercising the start gate's refusal paths on hardware — see *What is actually
+   left* below.
+4. Before changing anything that touches a print, read *Design commitments worth
+   not re-litigating* at the bottom. Several were arrived at the hard way.
+
 ## Orientation
 
 This repository is a fork of `FatBoy721/Helix` (AGPL-3.0), working towards the
@@ -35,7 +48,8 @@ existing behaviour behind safety gates, not building new — see
 | gitignore repair | `5bbb3d1` | `services/gcode/` had never been committed; `main` could not build from a clean clone. |
 | 10 — monitoring | `018cef6` | `services/jobs/JobMonitor.ts`, `hooks/useJobMonitor.ts`. `docs/PHASE_10_MONITORING.md`. |
 | CI repair | `25edaf1` | `Build APK` skips instead of failing without signing secrets, so a red run means something. |
-| 11 — release quality (part) | `66968a5` + pending | Licence screen, diagnostic export, privacy screen. `docs/PHASE_11_RELEASE_QUALITY.md`. |
+| 11 — licence + diagnostics | `66968a5` | In-app AGPL text with a drift test, redacted diagnostic export. `docs/PHASE_11_RELEASE_QUALITY.md`. |
+| 11 — privacy screen | `fad986d` | Opt-in `FLAG_SECURE`, applied before the first frame. |
 
 Backlog phases 0–10 are complete, and Phase 11 in part — see
 `docs/PHASE_11_RELEASE_QUALITY.md` for the audit of what already shipped and
@@ -95,18 +109,37 @@ Phase 7's review, and the **filament mapping hash** from Phase 6. The upload hal
 of the replacement flow exists and is tested. What does not exist is the
 approved-start path.
 
-## Next
+## What is actually left
 
-**What is left of Phase 11, then Phase 12.** The remaining Phase 11 items are
-each a piece of work in their own right rather than a tidy-up: a light theme, a
-real tablet layout, and a full accessibility sweep.
-None is blocking. Phase 12 (native MakerWorld search) is explicitly gated on the
-MVP working and is optional by design — the WebView path stays.
+Nothing is blocking, and no phase is half-finished. In rough order of value:
 
-The more valuable next move is probably neither: the pipeline is complete and
-verified end to end, but only the happy path has been exercised on a device.
-Every refusal path — stale camera, swapped filament, replaced file, expired
-approval — is covered by the suite alone.
+**1. Exercise the refusal paths on hardware.** The pipeline is verified end to
+end, but only the *happy* path. Every refusal — stale camera, swapped filament,
+replaced file, expired approval, busy printer — exists only in the unit suite.
+Those are the paths the whole design is for. Three are cheap to stage against a
+real U1:
+
+| To test | Do this | Expect |
+|---|---|---|
+| `start/printer-busy` | Start any print from Fluidd, then open the approval sheet | Refused before anything is touched |
+| `start/filament-changed` | Pull a spool between ticking bed-clear and holding | Refused, naming the toolhead |
+| `start/file-changed` | Delete or re-upload the file from Fluidd before holding | Refused, naming size or replacement |
+
+**2. The Slice tab's own upload path, on a device.** The one device run went via
+the native preview and the Files tab, so `uploadForApproval` — with its
+collision prompt and byte-count verification — has not run against a real
+printer.
+
+**3. Time a large reprint.** The 28 MB case is unmeasured. The download alone is
+~14 s on wifi, and the progress bar only tracks the download; the extent scan
+and hash that follow are silent. If it feels broken, that is why.
+
+**4. The remaining Phase 11 items**, each a piece of work in its own right
+rather than a tidy-up: a light theme, a real tablet layout, a full accessibility
+sweep.
+
+**5. Phase 12**, native MakerWorld search. Explicitly gated on the MVP working
+and optional by design — the WebView path stays regardless.
 
 ## The cutover is done
 
