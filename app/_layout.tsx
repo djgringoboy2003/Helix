@@ -109,6 +109,7 @@ function AppShell() {
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="makerworld-login" options={{ presentation: 'modal' }} />
             <Stack.Screen name="makerworld-download" options={{ presentation: 'modal' }} />
+            <Stack.Screen name="licences" />
           </Stack>
         </ThemeProvider>
       </MoonrakerProvider>

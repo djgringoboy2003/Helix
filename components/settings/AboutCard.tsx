@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import { useRouter } from 'expo-router';
 import { Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import * as Application from 'expo-application';
 import Constants from 'expo-constants';
@@ -8,6 +9,10 @@ import { ProgressBar } from '../ui';
 import { colors, spacing } from '../../constants/theme';
 import { DownloadProgress, downloadAndOpenApk, openUrl } from '../../services/apkInstaller';
 import { t } from '../../services/i18n';
+import { exportDiagnosticReport } from '../../services/diagnostics/ExportDiagnostics';
+import { useMoonraker } from '../../hooks/useMoonraker';
+import { useSettings } from '../../hooks/useSettings';
+import { printerConnectionUrl } from '../../services/moonraker';
 import {
   GitHubRelease,
   LATEST_RELEASE_URL,
@@ -47,6 +52,10 @@ function githubUpdatesEnabled(): boolean {
 }
 
 export default function AboutCard() {
+  const router = useRouter();
+  const { connection, klippyState, status, activeUrl } = useMoonraker();
+  const { settings } = useSettings();
+  const [exportingDiagnostic, setExportingDiagnostic] = useState(false);
   const [checkingUpdates, setCheckingUpdates] = useState(false);
   const [downloadingUpdate, setDownloadingUpdate] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
@@ -111,6 +120,42 @@ export default function AboutCard() {
     } finally {
       setDownloadingUpdate(false);
       setDownloadProgress(null);
+    }
+  };
+
+  // Everything in the report is redacted before it leaves — no addresses, no
+  // tokens, no device paths — but the operator still gets to look at it, which
+  // is why a failed share falls back to showing the text rather than dropping
+  // it.
+  const exportDiagnostics = async () => {
+    if (exportingDiagnostic) return;
+    setExportingDiagnostic(true);
+    try {
+      const activePrinter = settings.printers.find((p) => p.id === settings.activePrinterId);
+      const { text, shared } = await exportDiagnosticReport({
+        connectionMode: activePrinter?.connectionMode ?? settings.connectionMode ?? 'auto',
+        printerUrl: activeUrl || (activePrinter ? printerConnectionUrl(activePrinter) : ''),
+        connected: connection === 'connected',
+        klippyState,
+        printState: status.print_stats?.state ?? null,
+      });
+      if (!shared) {
+        setDialog({
+          title: t('Diagnostic report'),
+          message: 'Sharing was unavailable, so here is the report. Long-press to copy it.',
+          notes: text,
+          icon: 'file-document-outline',
+          actions: [{ text: t('OK'), variant: 'primary', onPress: closeDialog }],
+        });
+      }
+    } catch (e: any) {
+      messageDialog(
+        t('Diagnostic export failed'),
+        e?.message ?? 'Could not build the report.',
+        'alert-circle-outline'
+      );
+    } finally {
+      setExportingDiagnostic(false);
     }
   };
 
@@ -288,6 +333,29 @@ export default function AboutCard() {
           <MaterialCommunityIcons name="github" size={20} color={colors.text} />
           <Text style={styles.linkText}>GitHub - Helix</Text>
           <MaterialCommunityIcons name="open-in-new" size={16} color={colors.subtext} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.linkRow}
+          onPress={exportDiagnostics}
+          disabled={exportingDiagnostic}
+          accessibilityRole="button"
+          accessibilityLabel={t('Export a redacted diagnostic report')}
+        >
+          <MaterialCommunityIcons name="file-document-outline" size={20} color={colors.text} />
+          <Text style={styles.linkText}>
+            {exportingDiagnostic ? t('Building report...') : t('Export diagnostics')}
+          </Text>
+          <MaterialCommunityIcons name="share-variant-outline" size={16} color={colors.subtext} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          style={styles.linkRow}
+          onPress={() => router.push('/licences')}
+          accessibilityRole="button"
+          accessibilityLabel={t('Licences and attribution')}
+        >
+          <MaterialCommunityIcons name="scale-balance" size={20} color={colors.text} />
+          <Text style={styles.linkText}>{t('Licences')}</Text>
+          <MaterialCommunityIcons name="chevron-right" size={16} color={colors.subtext} />
         </TouchableOpacity>
         <TouchableOpacity style={styles.linkRow} onPress={() => openUrl(SUPPORT_URL).catch(() => {})}>
           <MaterialCommunityIcons name="coffee-outline" size={20} color={colors.text} />

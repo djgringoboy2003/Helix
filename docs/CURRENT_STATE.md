@@ -3,7 +3,7 @@
 Where the project actually stands, for picking up work without re-deriving it.
 Update this whenever a phase closes.
 
-**Last updated:** 2026-07-31, after Phase 10.
+**Last updated:** 2026-07-31, after Phase 11.
 
 ## Orientation
 
@@ -33,10 +33,14 @@ existing behaviour behind safety gates, not building new — see
 | 8 — upload-only | `00821a8` | `services/upload/UploadService.ts`. `docs/PHASE_8_UPLOAD_ONLY.md`. Additive only. |
 | 9 — safe start **and the cutover** | `3dd64c4` | `services/start/`, `services/printer/`, `StartApprovalDialog.tsx`, `useReprintApproval.ts`. `docs/PHASE_9_SAFE_START.md`. |
 | gitignore repair | `5bbb3d1` | `services/gcode/` had never been committed; `main` could not build from a clean clone. |
-| 10 — monitoring | pending commit | `services/jobs/JobMonitor.ts`, `hooks/useJobMonitor.ts`. `docs/PHASE_10_MONITORING.md`. |
+| 10 — monitoring | `018cef6` | `services/jobs/JobMonitor.ts`, `hooks/useJobMonitor.ts`. `docs/PHASE_10_MONITORING.md`. |
+| CI repair | `25edaf1` | `Build APK` skips instead of failing without signing secrets, so a red run means something. |
+| 11 — release quality (part) | pending commit | Licence screen, diagnostic export. `docs/PHASE_11_RELEASE_QUALITY.md`. |
 
-Backlog phases 0–10 are complete. Phase 1 (branding, icons, app identity) was
-**not** done — the app is still `Helix` / `org.crabcore.u1control` / 1.2.8.
+Backlog phases 0–10 are complete, and Phase 11 in part — see
+`docs/PHASE_11_RELEASE_QUALITY.md` for the audit of what already shipped and
+what was deliberately left. Phase 1 (branding, icons, app identity) was **not**
+done — the app is still `Helix` / `org.crabcore.u1control` / 1.2.8.
 
 ## On-device verification, 2026-07-31
 
@@ -93,13 +97,16 @@ approved-start path.
 
 ## Next
 
-**Phase 11, release quality.** Accessibility labels, large text, tablet layout,
-the licence screen outstanding since Stage A, diagnostic export, onboarding and
-first-run printer setup.
+**What is left of Phase 11, then Phase 12.** The remaining Phase 11 items are
+each a piece of work in their own right rather than a tidy-up: a light theme, a
+real tablet layout, an opt-in privacy screen, and a full accessibility sweep.
+None is blocking. Phase 12 (native MakerWorld search) is explicitly gated on the
+MVP working and is optional by design — the WebView path stays.
 
-Phase 10 closed the pipeline's last open loop: a job now records what happened,
-not only what was agreed. What remains before a release is presentation, and the
-things a stranger installing the APK would need.
+The more valuable next move is probably neither: the pipeline is complete and
+verified end to end, but only the happy path has been exercised on a device.
+Every refusal path — stale camera, swapped filament, replaced file, expired
+approval — is covered by the suite alone.
 
 ## The cutover is done
 
@@ -170,9 +177,12 @@ deliberately broken on the real printer.
   "existing library item" entry point has no UI.
 - **No thumbnail extraction in JS, deliberately.** The native module already
   does it (`getModelPlates`); the inspector records plate paths instead.
-- **No in-app licence screen.** `LICENSE`, `ATTRIBUTION.md` and
-  `THIRD_PARTY_NOTICES.md` are only reachable via the GitHub link. Pre-existing;
-  tracked as Phase 11.
+- **Dark theme only.** `constants/theme.ts` is a fixed dark palette threaded
+  through every screen and the native activities; nothing reads
+  `useColorScheme`. A light theme is a design decision and a wide refactor.
+- **No privacy screen.** Android cannot blank only the recents thumbnail — that
+  needs `FLAG_SECURE`, which also blocks the screenshots an operator wants of
+  their own print. Belongs behind a setting.
 - `extractMakerWorldDesignId` in `services/makerWorld.ts` matches anywhere in a
   string, so `https://evil.example/makerworld.com/models/1` satisfies it.
   `MakerWorldUrlParser` is the host-anchored replacement; the old helper goes
@@ -257,6 +267,12 @@ deliberately broken on the real printer.
 - **A reprint is a start.** There is no "we printed this before" exemption: the
   file is read back and hashed, because that is the only honest way to have a
   SHA-256 for bytes this app did not produce.
+- **The bundled licence text is generated and drift-tested.** `LICENSE` and the
+  notice files stay the source of truth; a test regenerates the module in memory
+  and fails if it differs, because a stale licence is the text the app conveys.
+- **The diagnostic report redacts by sweep, not by allowlist.** It also composes
+  carefully — shapes rather than values — but the unconditional sweep over the
+  finished text is the half that still works when someone adds a field.
 - **The hold is two seconds on purpose.** A tap is something a thumb does by
   accident; that is also why there is no second "are you sure".
 - **`standby` is a failure, not a completion.** Moonraker reports it after a
