@@ -355,6 +355,68 @@ class HelixSlicerModule(
   }
 
   /**
+   * The downloaded project's own `Metadata/project_settings.config`, as JSON
+   * text, or null when the archive has none.
+   *
+   * Read-only: this hands the foreign machine's settings up to
+   * `services/prepare/U1ProjectPreparer.ts`, which decides what may survive.
+   */
+  @ReactMethod
+  fun readProjectSettings(path: String, promise: Promise) {
+    try {
+      promise.resolve(U1ProjectRewriter.readProjectSettings(File(path.removePrefix("file://"))))
+    } catch (error: Throwable) {
+      promise.reject("E_READ_SETTINGS", error.message, error)
+    }
+  }
+
+  /**
+   * The bundled Snapmaker U1 printer profile, as JSON text.
+   *
+   * This asset is the authority on what this machine is — its bed, build
+   * height, motion limits and start/end G-code — and is what a downloaded
+   * project's machine keys are replaced with.
+   */
+  @ReactMethod
+  fun getU1PrinterProfile(promise: Promise) {
+    try {
+      val text = reactApplicationContext.assets
+        .open("orca_profiles/printer/snapmaker_u1.json")
+        .bufferedReader()
+        .use { it.readText() }
+      promise.resolve(text)
+    } catch (error: Throwable) {
+      promise.reject("E_NO_PROFILE", "Bundled Snapmaker U1 profile could not be read.", error)
+    }
+  }
+
+  /**
+   * Applies a preparation plan to [path], resolving the prepared file's path.
+   *
+   * The plan is computed in TypeScript; this only carries it out. Failure
+   * rejects rather than resolving the untouched path, so a caller can never
+   * mistake "not retargeted" for "retargeted".
+   */
+  @ReactMethod
+  fun prepareForU1(path: String, planJson: String, promise: Promise) {
+    try {
+      val file = File(path.removePrefix("file://"))
+      if (!file.exists()) {
+        promise.reject("E_NO_FILE", "Model file not found: ${file.absolutePath}")
+        return
+      }
+      val outFile = File(reactApplicationContext.filesDir, "u1_prepared_${file.name}")
+      if (!U1ProjectRewriter.rewrite(file, outFile, planJson)) {
+        promise.reject("E_PREPARE", "Could not write the retargeted project file.")
+        return
+      }
+      promise.resolve(outFile.absolutePath)
+    } catch (error: Throwable) {
+      promise.reject("E_PREPARE", error.message, error)
+    }
+  }
+
+  /**
    * Repacks [path] (any 3MF the engine accepts — typically an extracted plate)
    * into a temp 3MF where every object is reassigned to [targetTool] (0-based)
    * and the multi-filament project config is stripped, so a re-slice produces

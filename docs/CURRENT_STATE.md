@@ -3,7 +3,7 @@
 Where the project actually stands, for picking up work without re-deriving it.
 Update this whenever a phase closes.
 
-**Last updated:** 2026-07-31, after Phase 4.
+**Last updated:** 2026-07-31, after Phase 5.
 
 ## Orientation
 
@@ -26,9 +26,10 @@ existing behaviour behind safety gates, not building new — see
 | C — MakerWorld WebView MVP | `75d5563` | Explore tab and its logic modules. `docs/STAGE_C_EXPLORE.md`. |
 | CI fix | `850b733` | `android-baseline.yml` skips the APK build when `FIREBASE_CONFIG_B64` is absent. |
 | C fix | `957843d` | `DownloadIo` returns HTTP status and content type, so a 403 or 418 page is no longer written to disk and hashed as a model. |
-| 4 — unified imports | pending commit | `services/import/{ImportCoordinator,ImportTypes,ImportLibrary,ThreeMfInspector,ExpoImportIo}.ts`. `docs/PHASE_4_IMPORTS.md`. |
+| 4 — unified imports | `683e32f` | `services/import/{ImportCoordinator,ImportTypes,ImportLibrary,ThreeMfInspector,ExpoImportIo}.ts`. `docs/PHASE_4_IMPORTS.md`. |
+| 5 — U1 preparation | pending commit | `services/prepare/`, `U1ProjectRewriter.kt`, `PreparationReportCard.tsx`. `docs/PHASE_5_U1_PREPARATION.md`. |
 
-Backlog phases 0–4 are complete except the two Phase 3 acceptance tests that
+Backlog phases 0–5 are complete except the two Phase 3 acceptance tests that
 need a device and a real MakerWorld account (logged-in download, live navigation
 history). Phase 1 (branding, icons, app identity) was **not** done — the app is
 still `Helix` / `org.crabcore.u1control` / 1.2.8.
@@ -39,15 +40,19 @@ every archive. See `docs/PHASE_4_IMPORTS.md` for the list of inputs that are now
 **refused** where they previously reached the slicer; that is the user-visible
 change to review.
 
+Downloaded projects are now retargeted for the U1 at import: the source
+machine's bed, build height, motion limits and start/end/layer-change/
+filament-change G-code are replaced from the bundled U1 profile before anything
+can slice the file. See `docs/PHASE_5_U1_PREPARATION.md`, including what could
+**not** be verified about the prebuilt engine's key precedence.
+
 ## Next
 
-1. **Phase 5, U1 preparation.** Route Bambu files through the existing
-   sanitiser, strip foreign machine scripts, rebuild the U1 profile identity,
-   drop stale sliced output. `ThreeMfInspector` already reports which entries
-   hold foreign G-code and a foreign profile, so preparation knows what to
-   discard. This is also where XML parsing (and therefore a DEFLATE
-   implementation) finally has to exist.
-2. **Phase 6** (filament mapping), then 7 (slicing).
+1. **Phase 6, filament mapping.** Read live `print_task_config`, show T0–T3,
+   compare source material and colour against what is loaded, manual remap,
+   mapping hash. The mapping hash is one of the values a start approval binds
+   to, so this is a prerequisite for Phase 9.
+2. **Phase 7** (slicing and review).
 3. **Phases 8–9** are the high-risk pair; see below.
 
 ## The highest-risk item in the backlog
@@ -131,7 +136,17 @@ route through, but re-routing them is its own reviewed change (Phases 8–9).
   been edited.
 - **Import classification reads the ZIP index only**, never inflating an
   untrusted archive. Everything Phase 4 needed to know was decidable from entry
-  paths; part *contents* wait for Phase 5, which has to parse them anyway.
+  paths.
+- **No JavaScript inflate/deflate was ever written.** Phase 5 needed to rewrite
+  a 3MF, and `java.util.zip` already does that correctly in Kotlin — so the
+  *mechanism* is native and the *policy* is TypeScript, where the tests are.
+- **Machine identity is defined by the bundled U1 profile**, not by a denylist:
+  any key `snapmaker_u1.json` defines is taken from there, and unrecognised
+  `machine_*`/`printer_*` keys are dropped. A denylist would rot; this does not.
+- **Preparation happens at import, not at slice time**, because
+  `HelixSliceRunner` is shared by the RN bridge and the prepare screen's own
+  Slice button — sanitising at slice time from JS would leave that button
+  bypassing it.
 - **The test framework stays the hand-rolled runner.** Adopting Jest was
   considered and rejected in Stage B: new dependency, new config, second CI
   command, for tests that do not need it.

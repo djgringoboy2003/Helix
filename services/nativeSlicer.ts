@@ -108,6 +108,9 @@ type HelixSlicerModule = {
   pickModelFile: () => Promise<SharedModelFile>;
   getModelPlates: (path: string) => Promise<ModelPlate[]>;
   extractPlate: (path: string, plateId: number) => Promise<ExtractedPlate>;
+  readProjectSettings: (path: string) => Promise<string | null>;
+  getU1PrinterProfile: () => Promise<string>;
+  prepareForU1: (path: string, planJson: string) => Promise<string>;
   collapseModel: (path: string, targetTool: number) => Promise<string>;
   remapModel: (path: string, extruderMapJson: string) => Promise<string>;
   sliceFile: (path: string, options: SliceOptions | null) => Promise<NativeSliceResult>;
@@ -243,6 +246,38 @@ export async function getModelPlates(path: string): Promise<ModelPlate[]> {
   } catch {
     return [];
   }
+}
+
+/**
+ * The downloaded project's own `Metadata/project_settings.config`, as JSON text.
+ *
+ * Null when the file has none — a plain 3MF or an STL — which means there is no
+ * foreign machine profile to retarget.
+ */
+export async function readProjectSettings(path: string): Promise<string | null> {
+  if (Platform.OS !== 'android' || !nativeModule) return null;
+  return nativeModule.readProjectSettings(path.replace(/^file:\/\//, ''));
+}
+
+/** The bundled Snapmaker U1 printer profile as JSON text. */
+export async function getU1PrinterProfile(): Promise<string> {
+  if (Platform.OS !== 'android' || !nativeModule) {
+    throw new Error('The Snapmaker U1 profile is only available on Android.');
+  }
+  return nativeModule.getU1PrinterProfile();
+}
+
+/**
+ * Applies a preparation plan to a 3MF, returning the retargeted file's path.
+ *
+ * Rejects rather than returning the original path on failure: a caller must
+ * never be able to mistake an unprepared file for a prepared one.
+ */
+export async function prepareForU1(path: string, planJson: string): Promise<string> {
+  if (Platform.OS !== 'android' || !nativeModule) {
+    throw new Error('U1 preparation is Android-only.');
+  }
+  return nativeModule.prepareForU1(path.replace(/^file:\/\//, ''), planJson);
 }
 
 /** Repacks one plate of a multi-plate 3MF into its own temp file. */

@@ -53,6 +53,10 @@ import { subscribePendingModel, takePendingModel } from '../../services/pendingM
 import { getImportCoordinator } from '../../services/import/ExpoImportIo';
 import { detectImportSourceFromPath } from '../../services/import/ImportCoordinator';
 import type { ImportAttribution, ImportSourceKind } from '../../services/import/ImportTypes';
+import { runU1Preparation, summarizeReport } from '../../services/prepare/U1Preparation';
+import { nativePrepareIo } from '../../services/prepare/NativePrepareIo';
+import type { ConversionReport } from '../../services/prepare/U1ProjectPreparer';
+import PreparationReportCard from '../../components/PreparationReportCard';
 import { setPrintSentNotice } from '../../services/printSentBus';
 import PrintPreprocessDialog, { type PrintPref } from '../../components/PrintPreprocessDialog';
 import { api, printerConnectionUrl, thumbnailUrl } from '../../services/moonraker';
@@ -147,6 +151,9 @@ export default function SliceLabScreen() {
   const [plates, setPlates] = useState<ModelPlate[]>([]);
   const [selectedPlate, setSelectedPlate] = useState<{ id: number; name: string } | null>(null);
   const [platesFor, setPlatesFor] = useState<string | null>(null);
+  // What retargeting the current model for the U1 changed. Null when the file
+  // needed none — a mesh, or a 3MF with no foreign machine profile.
+  const [prepareReport, setPrepareReport] = useState<ConversionReport | null>(null);
   const [extracting, setExtracting] = useState(false);
   const [extractProgress, setExtractProgress] = useState<{ percent: number; phase: string } | null>(null);
   const [sayingIdx, setSayingIdx] = useState(0);
@@ -239,6 +246,7 @@ export default function SliceLabScreen() {
     setPlates([]);
     setSelectedPlate(null);
     setPlatesFor(null);
+    setPrepareReport(null);
   }, []);
 
   /**
@@ -285,15 +293,49 @@ export default function SliceLabScreen() {
       }
 
       const { record } = outcome;
-      const notice = record.notices.map((item) => item.message).join(' ');
+
+      // Retarget for the U1 before anything can slice it. A downloaded project
+      // describes another machine's bed, build height, motion limits and
+      // start/end G-code, and `CLAUDE.md` forbids any of that surviving. This
+      // happens at import rather than at slice time so both slice callers — the
+      // RN bridge and the prepare screen's own Slice button — get the prepared
+      // file, with no way to route around it.
+      setDownload({ state: 'downloading', message: `Retargeting ${record.fileName} for the U1…` });
+      const prepared = await runU1Preparation(
+        {
+          filePath: record.filePath,
+          isArchive: record.fileKind === '3mf',
+          ...(record.contents ? { slicedOutputPaths: record.contents.slicedOutputPaths } : {}),
+        },
+        nativePrepareIo
+      );
+
+      if (prepared.status === 'failed') {
+        // No fallback to the unprepared file: it still carries the source
+        // machine's G-code, so using it would be exactly what the safety rules
+        // forbid.
+        setPrepareReport(null);
+        setDownload({ state: 'error', message: prepared.message });
+        Alert.alert('Could not retarget for the U1', prepared.message);
+        return;
+      }
+
+      const report = prepared.status === 'prepared' ? prepared.report : null;
+      setPrepareReport(report);
+
+      const notes = [
+        ...record.notices.map((item) => item.message),
+        ...(report ? [summarizeReport(report)] : []),
+      ].filter((line): line is string => Boolean(line));
+
       setDownload({
         state: 'success',
-        message: notice ? `Opened ${record.fileName}. ${notice}` : `Opened ${record.fileName}.`,
+        message: [`Opened ${record.fileName}.`, ...notes].join(' '),
         result: {
           designId: extra?.designId ?? null,
           instanceId: extra?.instanceId ?? null,
           fileName: record.fileName,
-          filePath: record.filePath,
+          filePath: prepared.filePath,
           sizeBytes: record.sizeBytes,
         },
       });
@@ -1103,6 +1145,7 @@ export default function SliceLabScreen() {
             </TouchableOpacity>
           </View>
         ) : null}
+        {hasModel ? <PreparationReportCard report={prepareReport} /> : null}
         {!mwAuthed ? (
           <Text style={styles.hintText}>
             MakerWorld login is in{' '}
