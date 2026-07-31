@@ -49,6 +49,10 @@ jobs:
     needs: validate
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    outputs:
+      # Whether a signed APK was actually produced. The release job reads this
+      # so a skipped build can never be followed by a publish.
+      built: ${{ steps.secrets.outputs.available }}
     steps:
       - uses: actions/checkout@v7
 
@@ -68,7 +72,18 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Validate release secrets
+      # A repository without the signing secrets — any fork — cannot produce a
+      # signed APK, and never could. Failing here made this workflow red on
+      # every single push, which is worse than useless: it trained everyone to
+      # ignore the Actions tab, and a real `verify` failure (the missing
+      # `services/gcode`, 00821a8) sat unread underneath the noise. So a fork
+      # now reports and skips, exactly as `android-baseline.yml` already does,
+      # and a red run means something again.
+      #
+      # Upstream, where the secrets exist, is unaffected: every step below still
+      # runs and the release still publishes.
+      - name: Check release secrets
+        id: secrets
         env:
           FIREBASE_CONFIG_B64: ${{ secrets.FIREBASE_CONFIG_B64 }}
           RELEASE_KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
@@ -76,6 +91,7 @@ jobs:
           RELEASE_KEY_ALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
+          missing=""
           for name in \
             FIREBASE_CONFIG_B64 \
             RELEASE_KEYSTORE_B64 \
@@ -84,22 +100,30 @@ jobs:
             RELEASE_KEY_PASSWORD
           do
             if [ -z "${!name}" ]; then
-              echo "::error::$name is not configured"
-              exit 1
+              missing="$missing $name"
             fi
           done
+          if [ -n "$missing" ]; then
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Release signing secrets are not configured ($missing ). The signed APK build and the release were skipped; type-check, lint and regression checks still ran."
+          else
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Decode release keystore
+        if: steps.secrets.outputs.available == 'true'
         env:
           RELEASE_KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_B64 }}
         run: printf '%s' "$RELEASE_KEYSTORE_B64" | base64 -d > android/app/release.keystore
 
       - name: Decode Firebase Android config
+        if: steps.secrets.outputs.available == 'true'
         env:
           FIREBASE_CONFIG_B64: ${{ secrets.FIREBASE_CONFIG_B64 }}
         run: printf '%s' "$FIREBASE_CONFIG_B64" | base64 -d > android/app/google-services.json
 
       - name: Test and build release APK
+        if: steps.secrets.outputs.available == 'true'
         env:
           HELIX_DISTRIBUTION: github
           NODE_ENV: production
@@ -112,16 +136,21 @@ jobs:
           ./gradlew testReleaseUnitTest assembleRelease --no-daemon
 
       - name: Rename APK
+        if: steps.secrets.outputs.available == 'true'
         run: cp android/app/build/outputs/apk/release/app-release.apk helix.apk
 
       - uses: actions/upload-artifact@v7
+        if: steps.secrets.outputs.available == 'true'
         with:
           name: helix-apk
           path: helix.apk
 
   release:
     needs: build
-    if: github.ref == 'refs/heads/main'
+    # A skipped build must never be followed by a publish. Previously this was
+    # true only incidentally, because `build` failed; now that it can succeed
+    # without producing an APK, the guard has to be explicit.
+    if: github.ref == 'refs/heads/main' && needs.build.outputs.built == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
