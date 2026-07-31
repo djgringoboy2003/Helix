@@ -49,6 +49,7 @@ import {
 import { t } from '../../services/i18n';
 import { takePrintSentNotice, type PrintSentNotice } from '../../services/printSentBus';
 import { useReprintApproval } from '../../hooks/useReprintApproval';
+import { useJobMonitor } from '../../hooks/useJobMonitor';
 import StartApprovalDialog from '../../components/StartApprovalDialog';
 import { displayTemperature } from '../../services/temperature';
 import type { TemperatureUnit } from '../../services/temperature';
@@ -451,6 +452,21 @@ export default function Dashboard() {
   // the file is read back and hashed, the mapping is rebuilt from what the file
   // actually drives, and the operator approves against a live bed image. There
   // is no "we printed this before" shortcut.
+  // Keeps the job record following the print to its end. The dashboard above
+  // reads Moonraker directly and is unaffected; this only closes the audit
+  // trail, which previously stopped at `printing` and never recorded an outcome.
+  useJobMonitor(
+    useMemo(
+      () => ({
+        connected: connection === 'connected',
+        klippyReady: klippyState === 'ready',
+        printState: ps.state ?? null,
+        filename: ps.filename ?? null,
+      }),
+      [connection, klippyState, ps.state, ps.filename],
+    ),
+  );
+
   const reprint = async () => {
     if (!filename || !activeUrl) return;
     await reprintApproval.prepare({

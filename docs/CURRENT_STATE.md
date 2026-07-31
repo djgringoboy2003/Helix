@@ -3,7 +3,7 @@
 Where the project actually stands, for picking up work without re-deriving it.
 Update this whenever a phase closes.
 
-**Last updated:** 2026-07-31, after Phase 9 and the cutover.
+**Last updated:** 2026-07-31, after Phase 10.
 
 ## Orientation
 
@@ -31,9 +31,11 @@ existing behaviour behind safety gates, not building new — see
 | 6 — filament mapping | `7bce4f8` | `services/filament/`, `FilamentMappingCard.tsx`. `docs/PHASE_6_FILAMENT_MAPPING.md`. |
 | 7 — slicing and review | `00821a8` | `services/gcode/`, `SliceReviewCard.tsx`. `docs/PHASE_7_SLICE_REVIEW.md`. |
 | 8 — upload-only | `00821a8` | `services/upload/UploadService.ts`. `docs/PHASE_8_UPLOAD_ONLY.md`. Additive only. |
-| 9 — safe start **and the cutover** | pending commit | `services/start/`, `services/printer/`, `StartApprovalDialog.tsx`, `useReprintApproval.ts`. `docs/PHASE_9_SAFE_START.md`. |
+| 9 — safe start **and the cutover** | `3dd64c4` | `services/start/`, `services/printer/`, `StartApprovalDialog.tsx`, `useReprintApproval.ts`. `docs/PHASE_9_SAFE_START.md`. |
+| gitignore repair | `5bbb3d1` | `services/gcode/` had never been committed; `main` could not build from a clean clone. |
+| 10 — monitoring | pending commit | `services/jobs/JobMonitor.ts`, `hooks/useJobMonitor.ts`. `docs/PHASE_10_MONITORING.md`. |
 
-Backlog phases 0–9 are complete. Phase 1 (branding, icons, app identity) was
+Backlog phases 0–10 are complete. Phase 1 (branding, icons, app identity) was
 **not** done — the app is still `Helix` / `org.crabcore.u1control` / 1.2.8.
 
 ## On-device verification, 2026-07-31
@@ -91,14 +93,13 @@ approved-start path.
 
 ## Next
 
-**Phase 10, monitoring.** Live progress, ETA, layer count, temperature cards,
-active toolhead, pause/resume/cancel, filament runout, notifications and print
-history — most of which already ships in some form on the Home tab and needs
-auditing against the backlog rather than building from nothing.
+**Phase 11, release quality.** Accessibility labels, large text, tablet layout,
+the licence screen outstanding since Stage A, diagnostic export, onboarding and
+first-run printer setup.
 
-Phase 9 leaves the pipeline complete from browse to print. What it does not
-leave is a monitored print: once `startApprovedPrint` returns, the job record
-sits at `printing` and nothing updates it again.
+Phase 10 closed the pipeline's last open loop: a job now records what happened,
+not only what was agreed. What remains before a release is presentation, and the
+things a stranger installing the APK would need.
 
 ## The cutover is done
 
@@ -145,9 +146,11 @@ deliberately broken on the real printer.
   `review_required`, not at import. The reprint paths genuinely have no source
   or prepared artifact, and fabricating hashes to satisfy the earlier guards
   would be the confident wrong answer the safety rules exist to prevent.
-- **A started print is not monitored.** `startApprovedPrint` leaves the job at
-  `printing` and nothing advances it to `completed`, `paused` or `failed`
-  afterwards. That is Phase 10.
+- **No active toolhead, skip-object or runout watching.** Nothing reads
+  `active_extruder`, there is no `EXCLUDE_OBJECT` support, and filament runout
+  exists only as a settings string and a notification event — nothing watches
+  for it during a print. UI additions to a working surface; see
+  `docs/PHASE_10_MONITORING.md`.
 - **The filament mapping still does not drive slicing.** The Slice tab's
   `toolRemap` decides tools; the job's mapping *describes* that decision, binds
   the approval to it, and is what `SET_PRINT_USED_EXTRUDERS` is derived from.
@@ -159,9 +162,10 @@ deliberately broken on the real printer.
   the extent scan and the JS SHA-256 still have to run, with no indication. On a
   28 MB file the download alone is ~14 s on wifi, so the silent stretch after it
   is likely to be the part that feels broken. Measure before redesigning.
-- **No native file hasher.** `setFileHasher` has existed since Stage B and still
-  has no caller, so every hash is JavaScript at roughly a second per 10 MB.
-  `HelixSlicerModule` already does native file I/O and could supply one.
+- **The extent scan is still JavaScript**, and it reads the whole file through
+  the same base64 chunk reader the hash used to. Phase 10 gave hashing a native
+  digest, which removes about half the wait on a reprint; the scan stays in
+  TypeScript because the G-code rules belong where the tests are.
 - **No library screen.** `ImportLibrary.list()` exists and is persisted, but the
   "existing library item" entry point has no UI.
 - **No thumbnail extraction in JS, deliberately.** The native module already
@@ -173,9 +177,13 @@ deliberately broken on the real printer.
   string, so `https://evil.example/makerworld.com/models/1` satisfies it.
   `MakerWorldUrlParser` is the host-anchored replacement; the old helper goes
   when its call sites move behind the provider.
-- **`Build APK` CI is red on the fork** — it needs a release *keystore*, which
-  the fork has no secrets for. Upstream's pipeline, deliberately left alone. The
-  `release` job stays skipped, so nothing can publish from the fork.
+- **`Build APK` no longer fails on the fork.** It used to hard-fail on the
+  missing release keystore, so *every* push was red — and that noise buried a
+  real `Android baseline` failure (the missing `services/gcode`) for hours. It
+  now reports and skips, as `android-baseline.yml` already did, and the
+  `release` job is explicitly gated on an APK having been produced so the fork
+  still cannot publish. This revises the earlier "upstream's pipeline,
+  deliberately left alone" decision: the cost turned out not to be cosmetic.
 
 ## Working rules that are easy to get wrong
 
@@ -251,3 +259,12 @@ deliberately broken on the real printer.
   SHA-256 for bytes this app did not produce.
 - **The hold is two seconds on purpose.** A tap is something a thumb does by
   accident; that is also why there is no second "are you sure".
+- **`standby` is a failure, not a completion.** Moonraker reports it after a
+  cancel, an error recovery and a firmware restart alike, so reading it as
+  success would write a success into the record for a print that failed. A job
+  completes only when the printer says `complete`.
+- **A faster digest has to earn it.** The native SHA-256 is installed only after
+  reproducing the in-repo implementation's output on a deliberately awkward
+  fixture, compared against that implementation *directly* rather than through
+  `hashFile` — which dispatches to whatever is installed and would otherwise
+  compare the native digest with itself.
