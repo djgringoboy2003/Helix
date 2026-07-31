@@ -32,3 +32,8 @@ tmp/
 downloads/
 models/
 gcode/
+# ...but `gcode/` above is unanchored, so it also matched the *source*
+# directory `services/gcode/` and silently kept Phase 7's G-code review out of
+# the repository — `00821a8` committed the tests and the card without the three
+# modules they import. Re-include it explicitly.
+!services/gcode/
