@@ -3,7 +3,7 @@
 Where the project actually stands, for picking up work without re-deriving it.
 Update this whenever a phase closes.
 
-**Last updated:** 2026-07-29, after Stage C.
+**Last updated:** 2026-07-31, after Phase 4.
 
 ## Orientation
 
@@ -25,19 +25,29 @@ existing behaviour behind safety gates, not building new — see
 | B — domain scaffolding | `add4de6` | `services/{security,jobs,makerworld,import}/`, feature flags, test harness. `docs/STAGE_B_SCAFFOLDING.md`. |
 | C — MakerWorld WebView MVP | `75d5563` | Explore tab and its logic modules. `docs/STAGE_C_EXPLORE.md`. |
 | CI fix | `850b733` | `android-baseline.yml` skips the APK build when `FIREBASE_CONFIG_B64` is absent. |
+| C fix | `957843d` | `DownloadIo` returns HTTP status and content type, so a 403 or 418 page is no longer written to disk and hashed as a model. |
+| 4 — unified imports | pending commit | `services/import/{ImportCoordinator,ImportTypes,ImportLibrary,ThreeMfInspector,ExpoImportIo}.ts`. `docs/PHASE_4_IMPORTS.md`. |
 
-Backlog phases 0–3 are complete except the two Phase 3 acceptance tests that
+Backlog phases 0–4 are complete except the two Phase 3 acceptance tests that
 need a device and a real MakerWorld account (logged-in download, live navigation
 history). Phase 1 (branding, icons, app identity) was **not** done — the app is
 still `Helix` / `org.crabcore.u1control` / 1.2.8.
 
+All four import doors — file picker, Android share, open-with, MakerWorld — now
+run through `ImportCoordinator`, so `ThreeMfSecurityScanner` is finally called on
+every archive. See `docs/PHASE_4_IMPORTS.md` for the list of inputs that are now
+**refused** where they previously reached the slicer; that is the user-visible
+change to review.
+
 ## Next
 
-1. **Phase 4, unified imports.** The natural next step, and where
-   `ThreeMfSecurityScanner` finally gets called — it is built and fully tested
-   but nothing invokes it, so downloaded archives are currently unscanned. Also
-   brings SHA-256 dedupe, thumbnail extraction, and the creator/licence record.
-2. **Phase 5, U1 preparation**, then 6 (filament mapping) and 7 (slicing).
+1. **Phase 5, U1 preparation.** Route Bambu files through the existing
+   sanitiser, strip foreign machine scripts, rebuild the U1 profile identity,
+   drop stale sliced output. `ThreeMfInspector` already reports which entries
+   hold foreign G-code and a foreign profile, so preparation knows what to
+   discard. This is also where XML parsing (and therefore a DEFLATE
+   implementation) finally has to exist.
+2. **Phase 6** (filament mapping), then 7 (slicing).
 3. **Phases 8–9** are the high-risk pair; see below.
 
 ## The highest-risk item in the backlog
@@ -64,11 +74,14 @@ route through, but re-routing them is its own reviewed change (Phases 8–9).
   `app/makerworld-download.tsx`. Explore did not add a third — it wraps the same
   technique behind `ModelSourceProvider` — but the Slice tab has not moved onto
   the provider yet. Doing that is what retires one path, and it means editing a
-  shipped flow.
-- **No job record at import.** Explore produces a `DownloadedArtifact` and hands
-  the file to Slice exactly as the old flow does. Creating a `PrintJob` so the
-  artifact identity survives into the approval belongs with Phases 8–9.
-- **No 3MF scan on import** (see Phase 4 above).
+  shipped flow. Both now feed the same import, so neither is unscanned.
+- **No job record at import.** Phase 4 produces an `ImportRecord` carrying the
+  SHA-256 a job will bind to, but creating the `PrintJob` so that identity
+  survives into the approval belongs with Phases 8–9.
+- **No library screen.** `ImportLibrary.list()` exists and is persisted, but the
+  "existing library item" entry point has no UI.
+- **No thumbnail extraction in JS, deliberately.** The native module already
+  does it (`getModelPlates`); the inspector records plate paths instead.
 - **No in-app licence screen.** `LICENSE`, `ATTRIBUTION.md` and
   `THIRD_PARTY_NOTICES.md` are only reachable via the GitHub link. Pre-existing;
   tracked as Phase 11.
@@ -112,6 +125,13 @@ route through, but re-routing them is its own reviewed change (Phases 8–9).
   entirely, so no stored value can switch the camera check off.
 - **SHA-256 is implemented in this repository**, not delegated, so the primitive
   a start approval binds to stays inside this test suite.
+- **The import funnel is at the Slice tab**, where all four doors converge — not
+  at each door. That is what makes a check added once apply everywhere, and it
+  is why the older `app/makerworld-download.tsx` flow is scanned without having
+  been edited.
+- **Import classification reads the ZIP index only**, never inflating an
+  untrusted archive. Everything Phase 4 needed to know was decidable from entry
+  paths; part *contents* wait for Phase 5, which has to parse them anyway.
 - **The test framework stays the hand-rolled runner.** Adopting Jest was
   considered and rejected in Stage B: new dependency, new config, second CI
   command, for tests that do not need it.

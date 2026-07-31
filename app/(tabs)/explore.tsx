@@ -186,12 +186,23 @@ export default function ExploreScreen() {
           },
         });
 
+        // The provider's job ended at "bytes are on disk and here is what they
+        // are". Scanning and recording them is the import's job, and that
+        // happens once, on the Slice side, where every other entry point also
+        // arrives. The hash travels with the handoff so it is not taken twice.
         setMwDownload({
           designId: artifact.modelId,
           instanceId: artifact.profileId ?? '',
           fileName: artifact.fileName,
           filePath: artifact.filePath,
           sizeBytes: artifact.sizeBytes,
+          sha256: artifact.sha256,
+          attribution: {
+            title: artifact.source.title || null,
+            creator: artifact.source.creator || null,
+            licence: artifact.source.licence,
+            pageUrl: artifact.source.pageUrl || null,
+          },
         });
         setImportState({ phase: 'done', fileName: artifact.fileName });
         setArmedModel(null);

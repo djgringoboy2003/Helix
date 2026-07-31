@@ -50,6 +50,9 @@ import FilamentSlotsEditor, { type FilamentSlotDisplay } from '../../components/
 import { normalizeFilamentSlotColors } from '../../constants/filamentColors';
 import { takeMwDownload } from '../../services/mwBus';
 import { subscribePendingModel, takePendingModel } from '../../services/pendingModel';
+import { getImportCoordinator } from '../../services/import/ExpoImportIo';
+import { detectImportSourceFromPath } from '../../services/import/ImportCoordinator';
+import type { ImportAttribution, ImportSourceKind } from '../../services/import/ImportTypes';
 import { setPrintSentNotice } from '../../services/printSentBus';
 import PrintPreprocessDialog, { type PrintPref } from '../../components/PrintPreprocessDialog';
 import { api, printerConnectionUrl, thumbnailUrl } from '../../services/moonraker';
@@ -225,7 +228,8 @@ export default function SliceLabScreen() {
     }
   }, []);
 
-  const applyOpenedFile = useCallback((openedFile: SharedModelFile) => {
+  /** Drops everything derived from the previously loaded model. */
+  const resetForNewModel = useCallback(() => {
     handledUrlRef.current = null;
     awaitingInteractive.current = false;
     clearLastSlice().catch(() => {});
@@ -235,46 +239,95 @@ export default function SliceLabScreen() {
     setPlates([]);
     setSelectedPlate(null);
     setPlatesFor(null);
-    setDownload({
-      state: 'success',
-      message: `Opened ${openedFile.fileName}.`,
-      result: {
-        designId: null,
-        instanceId: null,
-        fileName: openedFile.fileName,
-        filePath: openedFile.filePath,
-        sizeBytes: openedFile.sizeBytes,
-      },
-    });
   }, []);
+
+  /**
+   * The one gate every model passes through before this screen will touch it.
+   *
+   * Helix has four doors into the Slice tab — the file picker, an Android share,
+   * an open-with intent, and a MakerWorld download — and until Phase 4 each one
+   * set the model directly, so an untrusted archive reached the native slicer
+   * with nothing having looked inside it. `ImportCoordinator` is now the only
+   * way in: it sanitises the name, scans the archive index, checks there is
+   * geometry to slice, and records the file under its SHA-256.
+   *
+   * A refused file is shown as a refusal rather than quietly dropped, and the
+   * previous model is cleared either way — leaving the last one on screen after
+   * the operator opened a different file would be showing them something other
+   * than what they chose.
+   */
+  const admitFile = useCallback(
+    async (
+      file: SharedModelFile,
+      sourceKind: ImportSourceKind,
+      extra?: {
+        knownSha256?: string;
+        attribution?: ImportAttribution;
+        designId?: string | null;
+        instanceId?: string | null;
+      }
+    ) => {
+      resetForNewModel();
+      setDownload({ state: 'downloading', message: `Checking ${file.fileName}…` });
+
+      const outcome = await getImportCoordinator().import({
+        filePath: file.filePath,
+        fileName: file.fileName,
+        sourceKind,
+        ...(extra?.knownSha256 ? { knownSha256: extra.knownSha256 } : {}),
+        ...(extra?.attribution ? { attribution: extra.attribution } : {}),
+      });
+
+      if (outcome.status === 'rejected') {
+        setDownload({ state: 'error', message: outcome.message });
+        Alert.alert('Import blocked', outcome.message);
+        return;
+      }
+
+      const { record } = outcome;
+      const notice = record.notices.map((item) => item.message).join(' ');
+      setDownload({
+        state: 'success',
+        message: notice ? `Opened ${record.fileName}. ${notice}` : `Opened ${record.fileName}.`,
+        result: {
+          designId: extra?.designId ?? null,
+          instanceId: extra?.instanceId ?? null,
+          fileName: record.fileName,
+          filePath: record.filePath,
+          sizeBytes: record.sizeBytes,
+        },
+      });
+    },
+    [resetForNewModel]
+  );
+
+  /** Fire-and-forget wrapper, for the callers that cannot await. */
+  const admitOpenedFile = useCallback(
+    (openedFile: SharedModelFile) => {
+      void admitFile(openedFile, detectImportSourceFromPath(openedFile.filePath));
+    },
+    [admitFile]
+  );
 
   const pickLocalModel = useCallback(async () => {
     try {
       const file = await pickModelFile();
-      applyOpenedFile(file);
+      await admitFile(file, 'file-picker');
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (/cancel/i.test(message)) return;
       Alert.alert('Upload', message);
     }
-  }, [applyOpenedFile]);
+  }, [admitFile]);
 
   const clearModel = useCallback(() => {
-    handledUrlRef.current = null;
-    awaitingInteractive.current = false;
-    clearLastSlice().catch(() => {});
-    setSlice({ state: 'idle' });
-    setUpload({ state: 'idle' });
-    setPrintStart({ state: 'idle' });
-    setPlates([]);
-    setSelectedPlate(null);
-    setPlatesFor(null);
+    resetForNewModel();
     setDownload({ state: 'idle', message: '' });
-  }, []);
+  }, [resetForNewModel]);
 
   // Open-with can finish importing after the Slice tab first paints — subscribe
   // so we still show the model when the native handoff lands late.
-  useEffect(() => subscribePendingModel(applyOpenedFile), [applyOpenedFile]);
+  useEffect(() => subscribePendingModel(admitOpenedFile), [admitOpenedFile]);
 
   // Re-check MakerWorld login + pick up interactive downloads / native slice results.
   useFocusEffect(
@@ -282,12 +335,32 @@ export default function SliceLabScreen() {
       let active = true;
       const pending = takeMwDownload();
       if (pending) {
-        handledUrlRef.current = null;
-        awaitingInteractive.current = false;
-        setDownload({ state: 'success', message: 'Model ready.', result: pending });
-        setSlice({ state: 'idle' });
-        setUpload({ state: 'idle' });
-        setPrintStart({ state: 'idle' });
+        // Both MakerWorld screens hand off here — the Explore tab and the older
+        // interactive download screen — so this is where either one's file is
+        // scanned. Explore already hashed what it wrote and sends the digest
+        // along; the older screen does not, and the import hashes for itself.
+        void admitFile(
+          {
+            fileName: pending.fileName,
+            filePath: pending.filePath,
+            sizeBytes: pending.sizeBytes,
+          },
+          'makerworld',
+          {
+            ...(pending.sha256 ? { knownSha256: pending.sha256 } : {}),
+            designId: pending.designId || null,
+            instanceId: pending.instanceId || null,
+            attribution: {
+              provider: 'makerworld',
+              modelId: pending.designId || null,
+              profileId: pending.instanceId || null,
+              title: pending.attribution?.title ?? null,
+              creator: pending.attribution?.creator ?? null,
+              licence: pending.attribution?.licence ?? null,
+              pageUrl: pending.attribution?.pageUrl ?? null,
+            },
+          }
+        );
       } else if (awaitingInteractive.current) {
         awaitingInteractive.current = false;
         handledUrlRef.current = null;
@@ -297,7 +370,7 @@ export default function SliceLabScreen() {
         });
       } else {
         const openedFile = takePendingModel();
-        if (openedFile) applyOpenedFile(openedFile);
+        if (openedFile) admitOpenedFile(openedFile);
       }
       getMakerWorldCookies()
         .then((c) => active && setMwAuthed(c.hasAuth))
@@ -308,7 +381,7 @@ export default function SliceLabScreen() {
       return () => {
         active = false;
       };
-    }, [applyOpenedFile, syncLastSlice, download])
+    }, [admitFile, admitOpenedFile, syncLastSlice, download])
   );
 
   const checkStatus = useCallback(async () => {
